@@ -1,7 +1,11 @@
 #include "cec_injector/mate/device_session.h"
+#include "cec_injector/mate/device_session_factory.h"
 #include "cec_injector/mate/host_platform.h"
 
 #include <array>
+#include <memory>
+#include <utility>
+#include <vector>
 
 #include "test_support.h"
 
@@ -29,6 +33,9 @@ class FakeObserver final : public DeviceSessionObserver {
 
 class FakeDeviceSession final : public DeviceSession {
  public:
+  explicit FakeDeviceSession(DeviceId id = DeviceId("fake-device"))
+      : id_(std::move(id)) {}
+
   const DeviceId& device_id() const noexcept override { return id_; }
   SessionState state() const noexcept override { return state_; }
   void set_observer(DeviceSessionObserver* observer) override { observer_ = observer; }
@@ -76,16 +83,52 @@ class FakeDeviceSession final : public DeviceSession {
   }
 
  private:
-  DeviceId id_{"fake-device"};
+  DeviceId id_;
   SessionState state_{SessionState::Discovered};
   DeviceStateSnapshot snapshot_{{true, true}, {}, {true, false, false, false}};
   DeviceSessionObserver* observer_{};
 };
 
+class FakeSessionFactory final : public DeviceSessionFactory {
+ public:
+  explicit FakeSessionFactory(std::vector<DiscoveredDevice> inventory)
+      : inventory_(std::move(inventory)) {}
+
+  std::unique_ptr<DeviceSession> create_session(
+      const DiscoveredDevice& selected) override {
+    for (const auto& known : inventory_) {
+      if (known.id == selected.id && known.locator == selected.locator) {
+        return std::make_unique<FakeDeviceSession>(selected.id);
+      }
+    }
+    return {};
+  }
+
+ private:
+  std::vector<DiscoveredDevice> inventory_;
+};
+
+class FakeLifecycleObserver final : public HostLifecycleObserver {
+ public:
+  void on_host_lifecycle_notification(
+      HostLifecycleNotification notification) override {
+    events.push_back(notification.event);
+    if (notification.transition_hold) {
+      holds.push_back(std::move(*notification.transition_hold));
+    }
+  }
+
+  std::vector<HostLifecycleEvent> events;
+  std::vector<HostTransitionHold> holds;
+};
+
 class FakeHostPlatform final : public HostPlatform {
  public:
+  void set_lifecycle_observer(HostLifecycleObserver* observer) override {
+    lifecycle_observer_ = observer;
+  }
   std::vector<DiscoveredDevice> discovered_devices() override {
-    return {{DeviceId("fake-device"), PlatformDeviceLocator("opaque"), "Fake"}};
+    return inventory;
   }
   PhysicalAddressResolution resolve_physical_address() override {
     return {PhysicalAddressStatus::Available, 4096};
@@ -112,9 +155,21 @@ class FakeHostPlatform final : public HostPlatform {
     return OperationResult::Success;
   }
 
+  void deliver(HostLifecycleEvent event,
+               std::optional<HostTransitionHold> hold = std::nullopt) {
+    if (lifecycle_observer_) {
+      lifecycle_observer_->on_host_lifecycle_notification(
+          HostLifecycleNotification(event, std::move(hold)));
+    }
+  }
+
+  std::vector<DiscoveredDevice> inventory{
+      {DeviceId("device-a"), PlatformDeviceLocator("opaque-a"), "Fake A"},
+      {DeviceId("device-b"), PlatformDeviceLocator("opaque-b"), "Fake B"}};
   HostPowerState power_state_{HostPowerState::Running};
   std::optional<SemanticRemoteAction> last_action;
   RemoteActionState last_action_state{RemoteActionState::Released};
+  HostLifecycleObserver* lifecycle_observer_{};
 };
 
 }  // namespace
@@ -132,7 +187,19 @@ int main() {
   CHECK(observer.frame_size == 2);
 
   FakeHostPlatform platform;
-  CHECK(platform.discovered_devices().size() == 1);
+  const auto discovered = platform.discovered_devices();
+  CHECK(discovered.size() == 2);
+  FakeSessionFactory empty_factory({});
+  CHECK(!empty_factory.create_session(discovered[0]));
+  FakeSessionFactory factory(discovered);
+  auto selected_session = factory.create_session(discovered[1]);
+  CHECK(selected_session);
+  CHECK(selected_session->device_id() == discovered[1].id);
+  const DiscoveredDevice unknown{DeviceId("unknown"),
+                                 PlatformDeviceLocator("opaque-unknown"),
+                                 "Unknown"};
+  CHECK(!factory.create_session(unknown));
+
   CHECK(platform.resolve_physical_address().status ==
         PhysicalAddressStatus::Available);
   CHECK(platform.emit_remote_action(SemanticRemoteAction::Guide,
@@ -143,5 +210,37 @@ int main() {
   CHECK(platform.host_power_state() == HostPowerState::PreparingSuspend);
   CHECK(platform.reset_remote_input() == OperationResult::Success);
   CHECK(!platform.last_action);
+
+  FakeLifecycleObserver lifecycle;
+  platform.set_lifecycle_observer(&lifecycle);
+  int suspend_releases = 0;
+  int shutdown_releases = 0;
+  platform.deliver(HostLifecycleEvent::PreparingSuspend,
+                   HostTransitionHold([&] { ++suspend_releases; }));
+  platform.deliver(HostLifecycleEvent::Resumed);
+  platform.deliver(HostLifecycleEvent::PreparingShutdown,
+                   HostTransitionHold([&] { ++shutdown_releases; }));
+  platform.deliver(HostLifecycleEvent::ShutdownCancelled);
+  CHECK(lifecycle.events ==
+        std::vector<HostLifecycleEvent>({
+            HostLifecycleEvent::PreparingSuspend,
+            HostLifecycleEvent::Resumed,
+            HostLifecycleEvent::PreparingShutdown,
+            HostLifecycleEvent::ShutdownCancelled}));
+  CHECK(lifecycle.holds.size() == 2);
+
+  CHECK(lifecycle.holds[0].active());
+  CHECK(lifecycle.holds[0].complete());
+  CHECK(!lifecycle.holds[0].active());
+  CHECK(!lifecycle.holds[0].complete());
+  CHECK(suspend_releases == 1);
+
+  {
+    HostTransitionHold abandoned([&] { ++shutdown_releases; });
+    CHECK(abandoned.active());
+  }
+  CHECK(shutdown_releases == 1);
+  lifecycle.holds.clear();
+  CHECK(shutdown_releases == 2);
   return EXIT_SUCCESS;
 }

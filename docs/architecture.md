@@ -31,8 +31,9 @@ project extension transactions must share the same session and reader.
 
 Provides narrow semantic host mechanisms: Device discovery, physical-address
 resolution, host power/session observation, suspend requests, remote-input
-emission, persistence locations, and Remote Wake environment checks. Platform
-APIs do not appear in Core contracts.
+emission, and Remote Wake environment checks. Preparing transitions may carry
+an opaque, move-only hold which Service completes after executing the Core
+plan. Platform APIs do not appear in Core contracts.
 
 ### Mate Service
 
@@ -40,6 +41,12 @@ Owns process lifetime, the Device registry, active selection, reconnection,
 composition, side-effect serialization, runtime diagnostics, and the local
 semantic API. It is the only process that directly opens and owns Device
 sessions.
+
+Service passes the selected `DiscoveredDevice`, including its opaque locator,
+to a composition-owned `DeviceSessionFactory`. The paired platform/adapter
+implementation resolves that locator without exposing its representation to
+Core. The factory creates a session but does not become a second connection
+owner.
 
 Discovery and session models support zero to many Devices. Initial product
 policy permits at most one selected active Device; ambiguous selection fails
@@ -63,6 +70,15 @@ Configuration separates persisted user or administrator intent from derived
 runtime state, ephemeral session state, and platform-internal state. It must
 not embed machine serials, test paths, host usernames, or development USB
 identity as product policy.
+
+Runtime, configuration, and state path selection belongs to future
+Service/platform composition. Logging belongs to Service diagnostics and
+platform integration. System-service integration belongs to packaging, while
+SteamOS persistence and repair belong specifically to `packaging/steamos`.
+
+Live/cache physical-address provenance, richer authorization diagnostics,
+cache topology identity, and asynchronous suspend diagnostics remain future
+implementation concerns; they do not expand the HostPlatform contract here.
 
 ## Architecture invariants
 

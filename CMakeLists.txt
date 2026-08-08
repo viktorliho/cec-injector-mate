@@ -12,6 +12,7 @@ option(CEC_INJECTOR_MATE_BUILD_LIBCEC
        "Build the production adapter for the required patched libCEC ABI" OFF)
 
 add_subdirectory(mate-core)
+add_subdirectory(service)
 add_subdirectory(adapters/libcec)
 
 if(BUILD_TESTING)
