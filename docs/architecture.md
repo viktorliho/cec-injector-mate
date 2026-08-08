@@ -1,0 +1,100 @@
+# Architecture contracts
+
+Status: Experimental architecture foundation.
+
+CEC Injector Mate is a reference host implementation. The
+[CEC Injector Device repository](https://github.com/viktorliho/cec-injector-device)
+is the sole authority for Device Protocol v1, the Pulse-Eight Serial Transport
+Binding, the Pulse-Eight Compatibility Profile, Wake Extension v1, and all
+numeric and wire-level semantics. Mate may implement codecs required to use a
+specified authoritative version, but it does not publish an independent Device
+protocol specification. If Mate and the normative Device documents disagree,
+the Device documents win.
+
+## Components
+
+### Mate Core
+
+Owns portable semantic state, policy decisions, typed configuration, semantic
+remote actions, lifecycle decisions, and typed results. It has no dependency
+on an operating system, libCEC, IPC, Device paths, SteamOS, or platform-native
+input codes.
+
+### DeviceSession
+
+Represents an operating-system-neutral Device connection and its state,
+capabilities, CEC operations, Wake operations, and connection events. Patched
+libCEC will be the initial adapter, outside Mate Core. Ordinary CEC traffic and
+project extension transactions must share the same session and reader.
+
+### HostPlatform
+
+Provides narrow semantic host mechanisms: Device discovery, physical-address
+resolution, host power/session observation, suspend requests, remote-input
+emission, persistence locations, and Remote Wake environment checks. Platform
+APIs do not appear in Core contracts.
+
+### Mate Service
+
+Owns process lifetime, the Device registry, active selection, reconnection,
+composition, side-effect serialization, runtime diagnostics, and the local
+semantic API. It is the only process that directly opens and owns Device
+sessions.
+
+Discovery and session models support zero to many Devices. Initial product
+policy permits at most one selected active Device; ambiguous selection fails
+closed.
+
+### CLI and future frontends
+
+The CLI is a normal client of Service semantics. It never opens a Device or
+parses Device wire traffic. Future GUIs are optional, unprivileged presentation
+components using the same semantic Service functionality. The local Mate API
+is an Experimental application API, not another CEC Injector standard.
+
+## Policy and mechanism
+
+Core receives semantic host and TV lifecycle events and decides desired
+actions. DeviceSession performs Device and CEC actions. HostPlatform performs
+host mechanisms such as suspend and input emission. Core uses semantic remote
+actions rather than Linux or other platform key codes.
+
+Configuration separates persisted user or administrator intent from derived
+runtime state, ephemeral session state, and platform-internal state. It must
+not embed machine serials, test paths, host usernames, or development USB
+identity as product policy.
+
+## Architecture invariants
+
+1. The Device repository is the sole authority for Device wire semantics.
+2. Mate Core is independent of operating systems, libCEC, IPC, and Device paths.
+3. Mate Service is the only process that owns Device sessions.
+4. The model supports 0..N discovered Devices; initial policy allows at most one selected active Device.
+5. Ambiguous Device selection fails closed.
+6. libCEC is an adapter, not part of Mate Core.
+7. Ordinary CEC and project extension traffic share one Device session and reader.
+8. Core uses semantic remote actions, not platform-native key codes.
+9. Core decides policy; DeviceSession and HostPlatform execute mechanisms.
+10. The local Mate API is an Experimental application API, not another CEC Injector standard.
+11. A GUI is optional, unprivileged, and never owns a Device.
+12. Linux integration is immutable-friendly; generic Linux integration is separate from SteamOS persistence.
+13. The runtime Service uses minimum privilege.
+14. Restart and reconnect do not implicitly replay power or input actions.
+
+## Linux direction
+
+Linux is the first reference platform and SteamOS is the first parity target.
+Installed runtime operation must not require a container or modification of
+`/usr`. Integration must be reproducible, repairable, and separable into
+generic Linux mechanisms and SteamOS-specific persistence.
+
+## Deferred decisions
+
+- IPC technology and schema;
+- GUI toolkit, repositories, and implementation;
+- Windows and macOS implementations;
+- policy for multiple simultaneously active Devices;
+- installer and package format;
+- configuration hot reload;
+- protocol code generation or a shared protocol package;
+- replacement of libCEC.
