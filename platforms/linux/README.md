@@ -33,6 +33,19 @@ identity cannot be proven or has changed. This permits conservative recovery
 when a validated base block remains visible but the CTA extension is
 temporarily unavailable.
 
-Power/session integration, input emission, and Remote Wake environment
-mechanisms remain future Linux work. Mate Core policy and SteamOS-specific
-persistence do not belong here.
+Linux remote input maps generic semantic navigation and media actions to a
+private Linux key vocabulary. The uinput backend advertises only configured
+keys, emits a synchronization event after every key transition, tracks one
+active binding, and applies a 900 ms safety release. Chords are supported for
+later profiles; `Guide` is profile-required, while `Home` and `Menu` are
+currently unmapped. In particular, the private SteamOS `Guide` to Ctrl+1
+choice is not a generic mapping.
+
+Remote Wake support is runtime inspection only. Using the current discovery
+metadata, it resolves the stable locator to the current tty, validates the
+matching USB ancestor, and reads `power/wakeup` without writing sysfs.
+Privileged wake configuration and repair remain packaging responsibilities;
+machine-specific serial rules are not part of the runtime.
+
+Power/session integration remains future Linux work. Mate Core policy and
+SteamOS-specific persistence do not belong here.

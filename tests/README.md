@@ -23,6 +23,13 @@ validation, deterministic DRM connector observations, filesystem read
 failures, unique/ambiguous resolution, and topology-bound atomic cache
 fallback. No private display capture or machine-specific PA is included.
 
+Linux remote-input tests use an in-memory sink to verify generic/profile
+mapping boundaries, key/chord ordering, key-plus-sync emission, duplicate
+suppression, changed bindings, reset, timeout release, and failure recovery
+without opening `/dev/uinput`. Remote Wake tests build a synthetic sysfs and
+device-link tree to verify authorization, denial, missing/mismatched devices,
+ambiguous USB ancestry, tty renumbering, and read-only behavior.
+
 Future Service, other Linux platform slices, and external libCEC integration
 tests remain separate. Hardware validation remains distinct from native CTest
 results.
