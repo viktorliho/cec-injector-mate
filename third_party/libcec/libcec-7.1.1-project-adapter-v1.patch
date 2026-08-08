@@ -1,0 +1,416 @@
+diff --git a/include/cec_project_adapter.h b/include/cec_project_adapter.h
+new file mode 100644
+index 0000000..8e1f298
+--- /dev/null
++++ b/include/cec_project_adapter.h
+@@ -0,0 +1,32 @@
++#pragma once
++
++#include <stdint.h>
++
++#include "cectypes.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++enum cec_project_adapter_result_v1 {
++  CEC_PROJECT_ADAPTER_OK = 0,
++  CEC_PROJECT_ADAPTER_INVALID_ARGUMENT = 1,
++  CEC_PROJECT_ADAPTER_UNSUPPORTED = 2,
++  CEC_PROJECT_ADAPTER_NOT_OPEN = 3,
++  CEC_PROJECT_ADAPTER_TIMEOUT = 4,
++  CEC_PROJECT_ADAPTER_REJECTED = 5,
++  CEC_PROJECT_ADAPTER_MALFORMED_RESPONSE = 6,
++  CEC_PROJECT_ADAPTER_DISCONNECTED = 7,
++  CEC_PROJECT_ADAPTER_BUFFER_TOO_SMALL = 8,
++  CEC_PROJECT_ADAPTER_INTERNAL_ERROR = 9
++};
++
++/* response contains the unframed response command followed by its payload. */
++extern DECLSPEC int32_t cec_project_adapter_transaction_v1(
++    void* adapter, uint8_t command, const uint8_t* request,
++    uint32_t request_size, uint8_t* response, uint32_t response_capacity,
++    uint32_t* response_size, uint32_t timeout_ms);
++
++#ifdef __cplusplus
++}
++#endif
+diff --git a/src/libcec/CECProcessor.cpp b/src/libcec/CECProcessor.cpp
+index a9abb19..2c7c2e9 100644
+--- a/src/libcec/CECProcessor.cpp
++++ b/src/libcec/CECProcessor.cpp
+@@ -661,6 +661,16 @@ bool CCECProcessor::PingAdapter(void)
+   return m_communication->PingAdapter();
+ }
+ 
++int32_t CCECProcessor::ProjectAdapterTransaction(
++    uint8_t command, const uint8_t* request, uint32_t requestSize,
++    uint8_t* response, uint32_t responseCapacity, uint32_t* responseSize,
++    uint32_t timeoutMs)
++{
++  return m_communication ? m_communication->ProjectAdapterTransaction(
++      command, request, requestSize, response, responseCapacity, responseSize,
++      timeoutMs) : 3;
++}
++
+ void CCECProcessor::HandlePoll(cec_logical_address initiator, cec_logical_address destination)
+ {
+   CCECBusDevice *device = m_busDevices->At(destination);
+diff --git a/src/libcec/CECProcessor.h b/src/libcec/CECProcessor.h
+index 1e10685..bb27d13 100644
+--- a/src/libcec/CECProcessor.h
++++ b/src/libcec/CECProcessor.h
+@@ -143,6 +143,9 @@ namespace CEC
+ 
+       bool StartBootloader(const char *strPort = NULL);
+       bool PingAdapter(void);
++      int32_t ProjectAdapterTransaction(uint8_t command, const uint8_t* request,
++          uint32_t requestSize, uint8_t* response, uint32_t responseCapacity,
++          uint32_t* responseSize, uint32_t timeoutMs);
+       void HandlePoll(cec_logical_address initiator, cec_logical_address destination);
+       bool HandleReceiveFailed(cec_logical_address initiator);
+ 
+diff --git a/src/libcec/CMakeLists.txt b/src/libcec/CMakeLists.txt
+index 0432a07..77f664b 100644
+--- a/src/libcec/CMakeLists.txt
++++ b/src/libcec/CMakeLists.txt
+@@ -73,6 +73,7 @@ set(CEC_SOURCES_PLATFORM platform/adl/adl-edid.cpp
+ 
+ # headers
+ set(CEC_EXT_HEADERS ${PROJECT_SOURCE_DIR}/../../include/cec.h
++                    ${PROJECT_SOURCE_DIR}/../../include/cec_project_adapter.h
+                     ${PROJECT_SOURCE_DIR}/../../include/cecc.h
+                     ${PROJECT_SOURCE_DIR}/../../include/cecloader.h
+                     ${PROJECT_SOURCE_DIR}/../../include/ceccloader.h
+@@ -181,6 +182,7 @@ endif()
+ 
+ # install headers
+ install(FILES ${PROJECT_SOURCE_DIR}/../../include/cec.h
++              ${PROJECT_SOURCE_DIR}/../../include/cec_project_adapter.h
+               ${PROJECT_SOURCE_DIR}/../../include/cecc.h
+               ${PROJECT_SOURCE_DIR}/../../include/cecloader.h
+               ${PROJECT_SOURCE_DIR}/../../include/ceccloader.h
+diff --git a/src/libcec/LibCEC.cpp b/src/libcec/LibCEC.cpp
+index 7b5c693..1403cf6 100644
+--- a/src/libcec/LibCEC.cpp
++++ b/src/libcec/LibCEC.cpp
+@@ -98,6 +98,40 @@ bool CLibCEC::Open(const char *strPort, uint32_t iTimeoutMs /* = CEC_DEFAULT_CON
+   return true;
+ }
+ 
++int32_t CLibCEC::ProjectAdapterTransaction(
++    uint8_t command, const uint8_t* request, uint32_t requestSize,
++    uint8_t* response, uint32_t responseCapacity, uint32_t* responseSize,
++    uint32_t timeoutMs)
++{
++  return m_cec ? m_cec->ProjectAdapterTransaction(command, request, requestSize,
++      response, responseCapacity, responseSize, timeoutMs) : 3;
++}
++
++extern "C" DECLSPEC int32_t cec_project_adapter_transaction_v1(
++    void* adapter, uint8_t command, const uint8_t* request,
++    uint32_t requestSize, uint8_t* response, uint32_t responseCapacity,
++    uint32_t* responseSize, uint32_t timeoutMs)
++{
++  if (!adapter)
++    return 1;
++  try
++  {
++    CLibCEC* implementation = dynamic_cast<CLibCEC*>(
++        static_cast<ICECAdapter*>(adapter));
++    if (!implementation)
++      return 2;
++    return implementation->ProjectAdapterTransaction(
++        command, request, requestSize, response, responseCapacity, responseSize,
++        timeoutMs);
++  }
++  catch (...)
++  {
++    if (responseSize)
++      *responseSize = 0;
++    return 9;
++  }
++}
++
+ void CLibCEC::Close(void)
+ {
+   if (!m_cec)
+diff --git a/src/libcec/LibCEC.h b/src/libcec/LibCEC.h
+index efedbcb..0254f75 100644
+--- a/src/libcec/LibCEC.h
++++ b/src/libcec/LibCEC.h
+@@ -71,6 +71,9 @@ namespace CEC
+       int8_t FindAdapters(cec_adapter *deviceList, uint8_t iBufSize, const char *strDevicePath = NULL);
+       int8_t DetectAdapters(cec_adapter_descriptor *deviceList, uint8_t iBufSize, const char *strDevicePath = NULL, bool bQuickScan = false);
+       bool PingAdapter(void);
++      int32_t ProjectAdapterTransaction(uint8_t command, const uint8_t* request,
++          uint32_t requestSize, uint8_t* response, uint32_t responseCapacity,
++          uint32_t* responseSize, uint32_t timeoutMs);
+       bool StartBootloader(void);
+ 
+       bool Transmit(const cec_command &data);
+diff --git a/src/libcec/adapter/AdapterCommunication.h b/src/libcec/adapter/AdapterCommunication.h
+index f887d89..061fa90 100644
+--- a/src/libcec/adapter/AdapterCommunication.h
++++ b/src/libcec/adapter/AdapterCommunication.h
+@@ -131,6 +131,9 @@ namespace CEC
+      */
+     virtual cec_adapter_message_state Write(const cec_command &data, bool &bRetry, uint8_t iLineTimeout, bool bIsReply) = 0;
+ 
++    virtual int32_t ProjectAdapterTransaction(uint8_t, const uint8_t*, uint32_t,
++        uint8_t*, uint32_t, uint32_t*, uint32_t) { return 2; }
++
+     /*!
+      * @brief Change the current line timeout on the CEC bus
+      * @param iTimeout The new timeout
+diff --git a/src/libcec/adapter/Pulse-Eight/USBCECAdapterCommunication.cpp b/src/libcec/adapter/Pulse-Eight/USBCECAdapterCommunication.cpp
+index d0e0855..26f5fe8 100644
+--- a/src/libcec/adapter/Pulse-Eight/USBCECAdapterCommunication.cpp
++++ b/src/libcec/adapter/Pulse-Eight/USBCECAdapterCommunication.cpp
+@@ -47,6 +47,7 @@
+ #include "platform/drm/drm-edid.h"
+ #include "LibCEC.h"
+ #include "CECProcessor.h"
++#include "cec_project_adapter.h"
+ 
+ using namespace CEC;
+ using namespace P8PLATFORM;
+@@ -119,6 +120,12 @@ bool CUSBCECAdapterCommunication::Open(uint32_t iTimeoutMs /* = CEC_DEFAULT_CONN
+       return true;
+     }
+ 
++    {
++      CLockObject stateLock(m_projectStateMutex);
++      m_projectResponseQuarantined = false;
++      m_projectDisconnected = false;
++    }
++
+     ResetMessageQueue();
+ 
+     /* try to open the connection */
+@@ -268,6 +275,107 @@ cec_adapter_message_state CUSBCECAdapterCommunication::Write(const cec_command &
+   return retVal;
+ }
+ 
++int32_t CUSBCECAdapterCommunication::ProjectAdapterTransaction(
++    uint8_t command, const uint8_t* request, uint32_t requestSize,
++    uint8_t* response, uint32_t responseCapacity, uint32_t* responseSize,
++    uint32_t timeoutMs)
++{
++  if (responseSize)
++    *responseSize = 0;
++  if (command < 0xE0 || command > 0xE7 || requestSize > 64 ||
++      (requestSize && !request) || !response || !responseSize ||
++      responseCapacity == 0 || timeoutMs == 0)
++    return CEC_PROJECT_ADAPTER_INVALID_ARGUMENT;
++
++  CLockObject projectLock(m_projectMutex);
++  {
++    CLockObject stateLock(m_projectStateMutex);
++    if (m_projectResponseQuarantined)
++      return CEC_PROJECT_ADAPTER_TIMEOUT;
++    if (m_projectDisconnected)
++      return CEC_PROJECT_ADAPTER_DISCONNECTED;
++  }
++  if (!IsOpen() || !m_adapterMessageQueue)
++    return CEC_PROJECT_ADAPTER_NOT_OPEN;
++
++  CCECAdapterMessage* output = new CCECAdapterMessage;
++  output->project_command = command;
++  output->PushBack(MSGSTART);
++  output->PushEscaped(command);
++  for (uint32_t i = 0; i < requestSize; ++i)
++    output->PushEscaped(request[i]);
++  output->PushBack(MSGEND);
++  output->transmit_timeout = static_cast<int32_t>(timeoutMs);
++
++  const bool completed = m_adapterMessageQueue->Write(output);
++  if (!completed)
++  {
++    bool disconnected = !IsOpen() || !IsRunning();
++    {
++      CLockObject stateLock(m_projectStateMutex);
++      disconnected = disconnected || m_projectDisconnected;
++    }
++    delete output;
++    return disconnected ? CEC_PROJECT_ADAPTER_DISCONNECTED
++                        : CEC_PROJECT_ADAPTER_TIMEOUT;
++  }
++
++  if (output->m_rx_len < 3 || output->m_rx_data[0] != MSGSTART ||
++      output->m_rx_data[output->m_rx_len - 1] != MSGEND)
++  {
++    delete output;
++    return CEC_PROJECT_ADAPTER_MALFORMED_RESPONSE;
++  }
++
++  const uint8_t responseCommand = output->m_rx_data[1];
++  const bool direct = responseCommand == command;
++  const bool accepted = responseCommand == MSGCODE_COMMAND_ACCEPTED &&
++                        output->m_rx_len == 4 && output->m_rx_data[2] == command;
++  const bool rejected = responseCommand == MSGCODE_COMMAND_REJECTED &&
++                        output->m_rx_len == 4 && output->m_rx_data[2] == command;
++  if (!direct && !accepted && !rejected)
++  {
++    delete output;
++    return CEC_PROJECT_ADAPTER_MALFORMED_RESPONSE;
++  }
++
++  const uint32_t unframedSize = output->m_rx_len - 2;
++  if (unframedSize > responseCapacity)
++  {
++    delete output;
++    return CEC_PROJECT_ADAPTER_BUFFER_TOO_SMALL;
++  }
++  memcpy(response, &output->m_rx_data[1], unframedSize);
++  *responseSize = unframedSize;
++  delete output;
++  return rejected ? CEC_PROJECT_ADAPTER_REJECTED : CEC_PROJECT_ADAPTER_OK;
++}
++
++void CUSBCECAdapterCommunication::ProjectResponseTimedOut(uint8_t command)
++{
++  CLockObject stateLock(m_projectStateMutex);
++  m_projectResponseQuarantined = true;
++  m_projectQuarantinedCommand = command;
++}
++
++bool CUSBCECAdapterCommunication::DiscardLateProjectResponse(
++    const CCECAdapterMessage& message)
++{
++  CLockObject stateLock(m_projectStateMutex);
++  if (!m_projectResponseQuarantined)
++    return false;
++  const uint8_t responseCommand = message.At(1);
++  const bool direct = responseCommand == m_projectQuarantinedCommand;
++  const bool acceptedOrRejected =
++      (responseCommand == MSGCODE_COMMAND_ACCEPTED ||
++       responseCommand == MSGCODE_COMMAND_REJECTED) &&
++      message.At(2) == m_projectQuarantinedCommand;
++  if (!direct && !acceptedOrRejected)
++    return false;
++  m_projectResponseQuarantined = false;
++  return true;
++}
++
+ void *CUSBCECAdapterCommunication::Process(void)
+ {
+   LIB_CEC->AddLog(CEC_LOG_DEBUG, "communication thread started");
+@@ -277,6 +385,10 @@ void *CUSBCECAdapterCommunication::Process(void)
+     /* read from the serial port */
+     if (!ReadFromDevice(50, 5))
+     {
++      {
++        CLockObject stateLock(m_projectStateMutex);
++        m_projectDisconnected = true;
++      }
+       libcec_parameter param;
+       param.paramData = NULL; param.paramType = CEC_PARAMETER_TYPE_UNKOWN;
+       LIB_CEC->Alert(CEC_ALERT_CONNECTION_LOST, param);
+diff --git a/src/libcec/adapter/Pulse-Eight/USBCECAdapterCommunication.h b/src/libcec/adapter/Pulse-Eight/USBCECAdapterCommunication.h
+index 46c5860..c2b12b9 100644
+--- a/src/libcec/adapter/Pulse-Eight/USBCECAdapterCommunication.h
++++ b/src/libcec/adapter/Pulse-Eight/USBCECAdapterCommunication.h
+@@ -74,6 +74,11 @@ namespace CEC
+     bool IsOpen(void);
+     std::string GetError(void) const;
+     cec_adapter_message_state Write(const cec_command &data, bool &bRetry, uint8_t iLineTimeout, bool bIsReply);
++    int32_t ProjectAdapterTransaction(uint8_t command, const uint8_t* request,
++        uint32_t requestSize, uint8_t* response, uint32_t responseCapacity,
++        uint32_t* responseSize, uint32_t timeoutMs);
++    void ProjectResponseTimedOut(uint8_t command);
++    bool DiscardLateProjectResponse(const CCECAdapterMessage& message);
+ 
+     bool StartBootloader(void);
+     bool SetLogicalAddresses(const cec_logical_addresses &addresses);
+@@ -197,6 +202,11 @@ namespace CEC
+     struct cec_adapter_stats                     m_stats;
+     P8PLATFORM::CMutex                           m_statsMutex;
+     P8PLATFORM::CMutex                           m_waitingMutex;
++    P8PLATFORM::CMutex                           m_projectMutex;
++    P8PLATFORM::CMutex                           m_projectStateMutex;
++    bool                                         m_projectResponseQuarantined{false};
++    uint8_t                                      m_projectQuarantinedCommand{0};
++    bool                                         m_projectDisconnected{false};
+   };
+ 
+   class CAdapterEepromWriteThread : public P8PLATFORM::CThread
+diff --git a/src/libcec/adapter/Pulse-Eight/USBCECAdapterMessage.cpp b/src/libcec/adapter/Pulse-Eight/USBCECAdapterMessage.cpp
+index 64bb59c..7585fe4 100644
+--- a/src/libcec/adapter/Pulse-Eight/USBCECAdapterMessage.cpp
++++ b/src/libcec/adapter/Pulse-Eight/USBCECAdapterMessage.cpp
+@@ -269,6 +269,7 @@ void CCECAdapterMessage::Clear(void)
+   lineTimeout        = 3;
+   bNextByteIsEscaped = false;
+   bFireAndForget     = false;
++  project_command    = 0;
+   m_tx_len         = 0;
+   m_rx_len     = 0;
+ }
+@@ -330,6 +331,8 @@ bool CCECAdapterMessage::PushReceivedByte(uint8_t byte)
+ 
+ cec_adapter_messagecode CCECAdapterMessage::Message(void) const
+ {
++  if (project_command >= 0xE0 && project_command <= 0xE7)
++    return (cec_adapter_messagecode) project_command;
+   return (m_tx_len >= 2) ?
+       (cec_adapter_messagecode) (m_tx_data[1] & ~(MSGCODE_FRAME_EOM | MSGCODE_FRAME_ACK)) :
+       MSGCODE_NOTHING;
+diff --git a/src/libcec/adapter/Pulse-Eight/USBCECAdapterMessage.h b/src/libcec/adapter/Pulse-Eight/USBCECAdapterMessage.h
+index fefe056..fb5ea89 100644
+--- a/src/libcec/adapter/Pulse-Eight/USBCECAdapterMessage.h
++++ b/src/libcec/adapter/Pulse-Eight/USBCECAdapterMessage.h
+@@ -254,6 +254,7 @@ namespace CEC
+     int32_t                               transmit_timeout;     /**< the timeout to use when sending this message */
+     uint8_t                               lineTimeout;          /**< the default CEC line timeout to use when sending this message */
+     bool                                  bFireAndForget;       /**< true to auto delete, don't wait for a response */
++    uint8_t                               project_command;      /**< unmasked E0-E7 command, or zero */
+ 
+   private:
+     bool                                  bNextByteIsEscaped;   /**< true when the next byte that is added will be escaped, false otherwise */
+diff --git a/src/libcec/adapter/Pulse-Eight/USBCECAdapterMessageQueue.cpp b/src/libcec/adapter/Pulse-Eight/USBCECAdapterMessageQueue.cpp
+index 064cc12..bb911c5 100644
+--- a/src/libcec/adapter/Pulse-Eight/USBCECAdapterMessageQueue.cpp
++++ b/src/libcec/adapter/Pulse-Eight/USBCECAdapterMessageQueue.cpp
+@@ -139,6 +139,19 @@ bool CCECAdapterMessageQueueEntry::IsResponse(const CCECAdapterMessage &msg)
+   cec_adapter_messagecode thisMsgCode = m_message->Message();
+   cec_adapter_messagecode msgCode = msg.Message();
+   cec_adapter_messagecode msgResponse = msg.ResponseTo();
++  const uint8_t rawMsgCode = msg.At(1);
++  const uint8_t rawResponse = msg.At(2);
++
++  // Project extension responses are validated strictly by the exported
++  // transaction function. Route a wrong E0-E7 response to the sole active
++  // project waiter so it returns MALFORMED rather than silently timing out.
++  if (thisMsgCode >= 0xE0 && thisMsgCode <= 0xE7 &&
++      rawMsgCode >= 0xE0 && rawMsgCode <= 0xE7)
++    return true;
++  if (thisMsgCode >= 0xE0 && thisMsgCode <= 0xE7 &&
++      (msgCode == MSGCODE_COMMAND_ACCEPTED ||
++       msgCode == MSGCODE_COMMAND_REJECTED))
++    return rawResponse == static_cast<uint8_t>(thisMsgCode);
+ 
+   // msgcode matches, always a response
+   if (msgCode == MessageCode())
+@@ -384,6 +397,8 @@ void CCECAdapterMessageQueue::CheckTimedOutMessages(void)
+ 
+ void CCECAdapterMessageQueue::MessageReceived(const CCECAdapterMessage &msg)
+ {
++  if (m_com->DiscardLateProjectResponse(msg))
++    return;
+   bool bHandled(false);
+   CLockObject lock(m_mutex);
+   /* send the received message to each entry in the queue until it is handled */
+@@ -476,7 +491,9 @@ bool CCECAdapterMessageQueue::Write(CCECAdapterMessage *msg)
+     if (msg->Message() != MSGCODE_START_BOOTLOADER)
+     {
+       CLockObject lock(m_mutex);
+-      m_messages.erase(iEntryId);
++    if (!bReturn && msg->Message() >= 0xE0 && msg->Message() <= 0xE7)
++      m_com->ProjectResponseTimedOut(msg->Message());
++    m_messages.erase(iEntryId);
+     }
+ 
+     if (msg->ReplyIsError() && msg->state != ADAPTER_MESSAGE_STATE_SENT_NOT_ACKED)
+
