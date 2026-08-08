@@ -30,6 +30,13 @@ without opening `/dev/uinput`. Remote Wake tests build a synthetic sysfs and
 device-link tree to verify authorization, denial, missing/mismatched devices,
 ambiguous USB ancestry, tty renumbering, and read-only behavior.
 
+Linux power/session tests use a narrow fake logind seam. They cover ordered
+sleep/shutdown lifecycle translation, transition-hold completion,
+abandonment, deadline and disconnect release, inhibitor reacquisition without
+synthetic Resume, suspend result mapping, fail-closed two-action
+authorization, and bounded reconnect backoff. The production sd-bus worker is
+compiled only by the opt-in Linux build; tests do not contact the system bus.
+
 Future Service, other Linux platform slices, and external libCEC integration
 tests remain separate. Hardware validation remains distinct from native CTest
 results.

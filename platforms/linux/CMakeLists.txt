@@ -93,6 +93,29 @@ else()
     )
 endif()
 
+add_library(cec_injector_mate_linux_power_session_model
+    src/power_session.cpp
+)
+add_library(CECInjector::MateLinuxPowerSessionModel ALIAS
+    cec_injector_mate_linux_power_session_model
+)
+target_include_directories(cec_injector_mate_linux_power_session_model
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(cec_injector_mate_linux_power_session_model
+    PUBLIC
+        CECInjector::MateCore
+)
+target_compile_features(cec_injector_mate_linux_power_session_model PUBLIC cxx_std_20)
+if(MSVC)
+    target_compile_options(cec_injector_mate_linux_power_session_model PRIVATE /W4)
+else()
+    target_compile_options(cec_injector_mate_linux_power_session_model PRIVATE
+        -Wall -Wextra -Wpedantic
+    )
+endif()
+
 if(CEC_INJECTOR_MATE_BUILD_LINUX)
     if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
         message(FATAL_ERROR "CEC_INJECTOR_MATE_BUILD_LINUX requires Linux")
@@ -100,6 +123,7 @@ if(CEC_INJECTOR_MATE_BUILD_LINUX)
 
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBUDEV REQUIRED IMPORTED_TARGET libudev)
+    pkg_check_modules(LIBSYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
     find_package(Threads REQUIRED)
 
     add_library(cec_injector_mate_linux_discovery
@@ -136,6 +160,24 @@ if(CEC_INJECTOR_MATE_BUILD_LINUX)
     )
     target_compile_features(cec_injector_mate_linux_uinput PUBLIC cxx_std_20)
     target_compile_options(cec_injector_mate_linux_uinput PRIVATE
+        -Wall -Wextra -Wpedantic
+    )
+
+    add_library(cec_injector_mate_linux_power_session
+        src/sd_bus_power_session.cpp
+    )
+    add_library(CECInjector::MateLinuxPowerSession ALIAS
+        cec_injector_mate_linux_power_session
+    )
+    target_link_libraries(cec_injector_mate_linux_power_session
+        PUBLIC
+            CECInjector::MateLinuxPowerSessionModel
+        PRIVATE
+            PkgConfig::LIBSYSTEMD
+            Threads::Threads
+    )
+    target_compile_features(cec_injector_mate_linux_power_session PUBLIC cxx_std_20)
+    target_compile_options(cec_injector_mate_linux_power_session PRIVATE
         -Wall -Wextra -Wpedantic
     )
 endif()
@@ -223,5 +265,26 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME mate-linux-remote-wake
         COMMAND mate-linux-remote-wake-tests
+    )
+
+    add_executable(mate-linux-power-session-tests
+        tests/power_session_test.cpp
+    )
+    target_link_libraries(mate-linux-power-session-tests PRIVATE
+        CECInjector::MateLinuxPowerSessionModel
+    )
+    target_include_directories(mate-linux-power-session-tests PRIVATE
+        ${PROJECT_SOURCE_DIR}/tests
+    )
+    target_compile_features(mate-linux-power-session-tests PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(mate-linux-power-session-tests PRIVATE /W4)
+    else()
+        target_compile_options(mate-linux-power-session-tests PRIVATE
+            -Wall -Wextra -Wpedantic
+        )
+    endif()
+    add_test(NAME mate-linux-power-session
+        COMMAND mate-linux-power-session-tests
     )
 endif()

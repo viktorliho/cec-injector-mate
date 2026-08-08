@@ -47,5 +47,20 @@ matching USB ancestor, and reads `power/wakeup` without writing sysfs.
 Privileged wake configuration and repair remain packaging responsibilities;
 machine-specific serial rules are not part of the runtime.
 
-Power/session integration remains future Linux work. Mate Core policy and
+Full LinuxHostPlatform composition remains future work. Mate Core policy and
 SteamOS-specific persistence do not belong here.
+
+Linux power/session support observes logind `PrepareForSleep` and
+`PrepareForShutdown` signals on the system bus. Prepare-true notifications
+carry an opaque delay-transition hold when an inhibitor was acquired; Service
+completes it after executing the Core plan, while the platform also enforces a
+three-second release deadline. Prepare-false maps to `Resumed` or
+`ShutdownCancelled`. Startup and reconnect reacquire inhibitors without
+inventing lifecycle events.
+
+The opt-in Linux runtime uses sd-bus, requests suspend with `Suspend(false)`,
+and fail-closed checks both normal and multiple-session suspend authorization.
+It only observes and holds host transitions: Service/Core remain responsible
+for input reset, Wake preparation, TV power, active-source, Device refresh,
+and Wake Reason operations. Service units, polkit installation, and other
+deployment configuration are not part of this platform slice.

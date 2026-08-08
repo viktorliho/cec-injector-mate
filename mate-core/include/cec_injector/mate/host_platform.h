@@ -1,8 +1,10 @@
 #pragma once
 
+#include <atomic>
 #include <compare>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -11,6 +13,8 @@
 #include "cec_injector/mate/types.h"
 
 namespace cec_injector::mate {
+
+class HostTransitionHoldControl;
 
 class PlatformDeviceLocator {
  public:
@@ -64,7 +68,8 @@ class HostTransitionHold {
 
   HostTransitionHold() = default;
   explicit HostTransitionHold(Completion completion)
-      : completion_(std::move(completion)), completed_(!completion_) {}
+      : state_(completion ? std::make_shared<State>(std::move(completion))
+                          : nullptr) {}
   // Destruction is safe abandonment: it releases an active hold once.
   ~HostTransitionHold() { (void)complete(); }
 
@@ -72,41 +77,79 @@ class HostTransitionHold {
   HostTransitionHold& operator=(const HostTransitionHold&) = delete;
 
   HostTransitionHold(HostTransitionHold&& other) noexcept
-      : completion_(std::move(other.completion_)),
-        completed_(other.completed_) {
-    other.completion_ = {};
-    other.completed_ = true;
-  }
+      : state_(std::move(other.state_)) {}
 
   HostTransitionHold& operator=(HostTransitionHold&& other) noexcept {
     if (this == &other) return *this;
     (void)complete();
-    completion_ = std::move(other.completion_);
-    completed_ = other.completed_;
-    other.completion_ = {};
-    other.completed_ = true;
+    state_ = std::move(other.state_);
     return *this;
   }
 
-  [[nodiscard]] bool active() const noexcept { return !completed_; }
+  [[nodiscard]] bool active() const noexcept {
+    return state_ && state_->active();
+  }
 
   // Returns true only for the owner that performs the single completion.
   bool complete() noexcept {
-    if (completed_) return false;
-    completed_ = true;
-    auto completion = std::move(completion_);
-    completion_ = {};
-    try {
-      completion();
-    } catch (...) {
-      // Releasing a platform transition must remain safe during destruction.
-    }
-    return true;
+    return state_ && state_->complete();
   }
 
  private:
-  Completion completion_;
-  bool completed_{true};
+  struct State {
+    explicit State(Completion callback) : completion(std::move(callback)) {}
+
+    [[nodiscard]] bool active() const noexcept { return !completed.load(); }
+
+    bool complete() noexcept {
+      bool expected = false;
+      if (!completed.compare_exchange_strong(expected, true)) return false;
+      try {
+        completion();
+      } catch (...) {
+        // Releasing a platform transition must remain safe during destruction.
+      }
+      return true;
+    }
+
+    Completion completion;
+    std::atomic<bool> completed{};
+  };
+
+  explicit HostTransitionHold(std::shared_ptr<State> state)
+      : state_(std::move(state)) {}
+
+  std::shared_ptr<State> state_;
+  friend class HostTransitionHoldControl;
+};
+
+// Platform-side control for the same logical hold handed to Service. It lets a
+// deadline or platform loss complete that hold without exposing native state.
+class HostTransitionHoldControl {
+ public:
+  using Completion = HostTransitionHold::Completion;
+
+  HostTransitionHoldControl() = default;
+  explicit HostTransitionHoldControl(Completion completion)
+      : state_(completion
+                   ? std::make_shared<HostTransitionHold::State>(
+                         std::move(completion))
+                   : nullptr) {}
+
+  [[nodiscard]] HostTransitionHold take_hold() noexcept {
+    bool expected = false;
+    if (!state_ || !taken_.compare_exchange_strong(expected, true)) return {};
+    return HostTransitionHold(state_);
+  }
+
+  [[nodiscard]] bool active() const noexcept {
+    return state_ && state_->active();
+  }
+  bool complete() noexcept { return state_ && state_->complete(); }
+
+ private:
+  std::shared_ptr<HostTransitionHold::State> state_;
+  std::atomic<bool> taken_{};
 };
 
 struct HostLifecycleNotification {

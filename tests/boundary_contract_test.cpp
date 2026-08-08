@@ -242,5 +242,31 @@ int main() {
   CHECK(shutdown_releases == 1);
   lifecycle.holds.clear();
   CHECK(shutdown_releases == 2);
+
+  int forced_releases = 0;
+  HostTransitionHoldControl control([&] { ++forced_releases; });
+  auto controlled = control.take_hold();
+  CHECK(controlled.active());
+  CHECK(control.active());
+  CHECK(!control.take_hold().active());
+  CHECK(control.complete());
+  CHECK(!control.active());
+  CHECK(!controlled.active());
+  CHECK(!controlled.complete());
+  CHECK(!control.complete());
+  CHECK(forced_releases == 1);
+
+  int move_releases = 0;
+  HostTransitionHold moved_from([&] { ++move_releases; });
+  HostTransitionHold moved_to(std::move(moved_from));
+  CHECK(!moved_from.active());
+  CHECK(moved_to.active());
+  HostTransitionHold assigned([&] { ++move_releases; });
+  assigned = std::move(moved_to);
+  CHECK(move_releases == 1);
+  CHECK(!moved_to.active());
+  CHECK(assigned.active());
+  CHECK(assigned.complete());
+  CHECK(move_releases == 2);
   return EXIT_SUCCESS;
 }
