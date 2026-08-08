@@ -10,10 +10,13 @@ include(CTest)
 
 option(CEC_INJECTOR_MATE_BUILD_LIBCEC
        "Build the production adapter for the required patched libCEC ABI" OFF)
+option(CEC_INJECTOR_MATE_BUILD_LINUX
+       "Build Linux platform implementations requiring host dependencies" OFF)
 
 add_subdirectory(mate-core)
 add_subdirectory(service)
 add_subdirectory(adapters/libcec)
+add_subdirectory(platforms/linux)
 
 if(BUILD_TESTING)
     add_subdirectory(tests)
