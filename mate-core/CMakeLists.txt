@@ -1,5 +1,7 @@
 add_library(cec_injector_mate_core
     src/device_registry.cpp
+    src/policy.cpp
+    src/semantic_event_queue.cpp
 )
 add_library(CECInjector::MateCore ALIAS cec_injector_mate_core)
 
