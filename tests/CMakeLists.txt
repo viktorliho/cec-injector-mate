@@ -24,3 +24,14 @@ add_test(NAME mate-core-boundary-scan
         -DCORE_DIR=${PROJECT_SOURCE_DIR}/mate-core
         -P ${CMAKE_CURRENT_SOURCE_DIR}/core_boundary_scan.cmake
 )
+
+add_executable(mate-service-tests service_test.cpp)
+target_link_libraries(mate-service-tests PRIVATE CECInjector::MateService)
+target_include_directories(mate-service-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mate-service-tests PRIVATE cxx_std_20)
+if(MSVC)
+    target_compile_options(mate-service-tests PRIVATE /W4)
+else()
+    target_compile_options(mate-service-tests PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+add_test(NAME mate-service COMMAND mate-service-tests)

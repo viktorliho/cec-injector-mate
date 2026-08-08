@@ -48,6 +48,12 @@ implementation resolves that locator without exposing its representation to
 Core. The factory creates a session but does not become a second connection
 owner.
 
+The foreground runtime serializes discovery, DeviceSession callbacks and host
+lifecycle notifications on a Service-owned worker. Device-bound policy work is
+tagged with the active session generation; replacement or loss invalidates old
+work without preventing completion of a host transition hold. Runtime process
+startup is passive and does not imply `BootRequested`.
+
 Discovery and session models support zero to many Devices. Initial product
 policy permits at most one selected active Device; ambiguous selection fails
 closed.

@@ -18,6 +18,17 @@ add_subdirectory(service)
 add_subdirectory(adapters/libcec)
 add_subdirectory(platforms/linux)
 
+if(CEC_INJECTOR_MATE_BUILD_LINUX AND CEC_INJECTOR_MATE_BUILD_LIBCEC)
+    add_executable(cec-injector-mate service/src/linux_main.cpp)
+    target_link_libraries(cec-injector-mate PRIVATE
+        CECInjector::MateService
+        CECInjector::MateLinuxHostPlatform
+        CECInjector::MateLinuxSessionFactory)
+    target_compile_features(cec-injector-mate PRIVATE cxx_std_20)
+    target_compile_options(cec-injector-mate PRIVATE
+        -Wall -Wextra -Wpedantic)
+endif()
+
 if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()

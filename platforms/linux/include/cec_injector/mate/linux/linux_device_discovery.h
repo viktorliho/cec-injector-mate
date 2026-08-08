@@ -62,6 +62,7 @@ class LinuxDeviceDiscovery {
 
   void start();
   void stop();
+  [[nodiscard]] std::vector<LinuxDeviceCandidate> enumerate_candidates() const;
   [[nodiscard]] LinuxDiscoverySnapshot enumerate() const;
 
  private:

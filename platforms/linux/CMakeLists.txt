@@ -180,6 +180,54 @@ if(CEC_INJECTOR_MATE_BUILD_LINUX)
     target_compile_options(cec_injector_mate_linux_power_session PRIVATE
         -Wall -Wextra -Wpedantic
     )
+
+    add_library(cec_injector_mate_linux_host_platform
+        src/linux_host_platform.cpp
+    )
+    add_library(CECInjector::MateLinuxHostPlatform ALIAS
+        cec_injector_mate_linux_host_platform
+    )
+    target_link_libraries(cec_injector_mate_linux_host_platform PUBLIC
+        CECInjector::MateLinuxDiscovery
+        CECInjector::MateLinuxPhysicalAddress
+        CECInjector::MateLinuxUinput
+        CECInjector::MateLinuxRemoteWake
+        CECInjector::MateLinuxPowerSession
+        Threads::Threads
+    )
+    target_compile_features(cec_injector_mate_linux_host_platform PUBLIC cxx_std_20)
+    target_compile_options(cec_injector_mate_linux_host_platform PRIVATE
+        -Wall -Wextra -Wpedantic)
+
+    if(CEC_INJECTOR_MATE_BUILD_LIBCEC)
+        add_library(cec_injector_mate_linux_session_factory
+            src/linux_device_session_factory.cpp
+        )
+        add_library(CECInjector::MateLinuxSessionFactory ALIAS
+            cec_injector_mate_linux_session_factory
+        )
+        target_link_libraries(cec_injector_mate_linux_session_factory PUBLIC
+            CECInjector::MateLinuxHostPlatform
+            CECInjector::LibCecAdapter
+            CECInjector::MateComposition
+        )
+        target_compile_features(cec_injector_mate_linux_session_factory PUBLIC cxx_std_20)
+        target_compile_options(cec_injector_mate_linux_session_factory PRIVATE
+            -Wall -Wextra -Wpedantic)
+        if(BUILD_TESTING)
+            add_executable(mate-linux-composition-tests
+                tests/linux_composition_test.cpp)
+            target_link_libraries(mate-linux-composition-tests PRIVATE
+                CECInjector::MateLinuxSessionFactory)
+            target_include_directories(mate-linux-composition-tests PRIVATE
+                ${PROJECT_SOURCE_DIR}/tests)
+            target_compile_features(mate-linux-composition-tests PRIVATE cxx_std_20)
+            target_compile_options(mate-linux-composition-tests PRIVATE
+                -Wall -Wextra -Wpedantic)
+            add_test(NAME mate-linux-composition
+                COMMAND mate-linux-composition-tests)
+        endif()
+    endif()
 endif()
 
 if(BUILD_TESTING)

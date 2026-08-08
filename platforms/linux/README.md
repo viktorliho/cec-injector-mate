@@ -47,7 +47,11 @@ matching USB ancestor, and reads `power/wakeup` without writing sysfs.
 Privileged wake configuration and repair remain packaging responsibilities;
 machine-specific serial rules are not part of the runtime.
 
-Full LinuxHostPlatform composition remains future work. Mate Core policy and
+`LinuxHostPlatform` composes discovery, DRM/EDID PA resolution, uinput,
+Remote Wake inspection, and power/session mechanisms behind the portable
+HostPlatform contract. Its paired session factory validates a selected record
+against the current private inventory and supplies the explicit by-id port to
+libCEC without auto-discovery or auto-connect. Mate Core policy and
 SteamOS-specific persistence do not belong here.
 
 Linux power/session support observes logind `PrepareForSleep` and
@@ -64,3 +68,6 @@ It only observes and holds host transitions: Service/Core remain responsible
 for input reset, Wake preparation, TV power, active-source, Device refresh,
 and Wake Reason operations. Service units, polkit installation, and other
 deployment configuration are not part of this platform slice.
+
+The optional construction-time input profile can supply the SteamOS parity
+binding `Guide` to Ctrl+1 without changing generic Linux mappings.

@@ -107,7 +107,8 @@ LinuxDeviceDiscovery::LinuxDeviceDiscovery(SnapshotCallback callback)
 
 LinuxDeviceDiscovery::~LinuxDeviceDiscovery() { stop(); }
 
-LinuxDiscoverySnapshot LinuxDeviceDiscovery::enumerate() const {
+std::vector<LinuxDeviceCandidate>
+LinuxDeviceDiscovery::enumerate_candidates() const {
   UdevPtr context(udev_new());
   if (!context) throw std::runtime_error("udev_new failed");
   EnumeratePtr enumeration(udev_enumerate_new(context.get()));
@@ -125,7 +126,11 @@ LinuxDiscoverySnapshot LinuxDeviceDiscovery::enumerate() const {
         context.get(), udev_list_entry_get_name(entry)));
     if (device) candidates.push_back(CandidateFrom(device.get()));
   }
-  return make_discovery_snapshot(candidates);
+  return candidates;
+}
+
+LinuxDiscoverySnapshot LinuxDeviceDiscovery::enumerate() const {
+  return make_discovery_snapshot(enumerate_candidates());
 }
 
 void LinuxDeviceDiscovery::start() {

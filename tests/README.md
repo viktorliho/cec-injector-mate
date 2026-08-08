@@ -37,6 +37,10 @@ synthetic Resume, suspend result mapping, fail-closed two-action
 authorization, and bounded reconnect backoff. The production sd-bus worker is
 compiled only by the opt-in Linux build; tests do not contact the system bus.
 
-Future Service, other Linux platform slices, and external libCEC integration
-tests remain separate. Hardware validation remains distinct from native CTest
+Service tests use fake HostPlatform and DeviceSession implementations to cover
+selection, PA-gated construction, PA replacement, generation cancellation,
+passive startup, validated CEC User Control and TV Standby translation, Wake
+maintenance, lifecycle holds, policy dependencies, and clean shutdown. The
+full Linux+libCEC build also tests current-inventory locator validation without
+opening hardware. Hardware validation remains distinct from native CTest
 results.
