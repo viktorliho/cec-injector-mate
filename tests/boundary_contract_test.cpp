@@ -95,7 +95,11 @@ class FakeSessionFactory final : public DeviceSessionFactory {
       : inventory_(std::move(inventory)) {}
 
   std::unique_ptr<DeviceSession> create_session(
-      const DiscoveredDevice& selected) override {
+      const DiscoveredDevice& selected,
+      const DeviceSessionConfiguration& configuration) override {
+    last_configuration = configuration;
+    ++create_calls;
+    if (!selected.id.valid() || !configuration.valid()) return {};
     for (const auto& known : inventory_) {
       if (known.id == selected.id && known.locator == selected.locator) {
         return std::make_unique<FakeDeviceSession>(selected.id);
@@ -103,6 +107,9 @@ class FakeSessionFactory final : public DeviceSessionFactory {
     }
     return {};
   }
+
+  DeviceSessionConfiguration last_configuration;
+  int create_calls{};
 
  private:
   std::vector<DiscoveredDevice> inventory_;
@@ -190,15 +197,22 @@ int main() {
   const auto discovered = platform.discovered_devices();
   CHECK(discovered.size() == 2);
   FakeSessionFactory empty_factory({});
-  CHECK(!empty_factory.create_session(discovered[0]));
+  const DeviceSessionConfiguration session_configuration{0x2100};
+  CHECK(!empty_factory.create_session(discovered[0], session_configuration));
   FakeSessionFactory factory(discovered);
-  auto selected_session = factory.create_session(discovered[1]);
+  auto selected_session =
+      factory.create_session(discovered[1], session_configuration);
   CHECK(selected_session);
+  CHECK(selected_session->state() == SessionState::Discovered);
+  CHECK(factory.last_configuration.physical_address == 0x2100);
   CHECK(selected_session->device_id() == discovered[1].id);
   const DiscoveredDevice unknown{DeviceId("unknown"),
                                  PlatformDeviceLocator("opaque-unknown"),
                                  "Unknown"};
-  CHECK(!factory.create_session(unknown));
+  CHECK(!factory.create_session(unknown, session_configuration));
+  CHECK(!factory.create_session(discovered[0], {0x0000}));
+  CHECK(!factory.create_session(discovered[0], {0xffff}));
+  CHECK(!factory.create_session(discovered[0], {0x2010}));
 
   CHECK(platform.resolve_physical_address().status ==
         PhysicalAddressStatus::Available);

@@ -3,14 +3,15 @@
 #include <memory>
 #include <string>
 #include "cec_injector/mate/device_session.h"
+#include "cec_injector/mate/device_session_factory.h"
 #include "cec_injector/mate/libcec/libcec_api.h"
 namespace cec_injector::mate::libcec {
 struct LibCecSessionOptions { std::string explicit_port;
-  std::uint16_t physical_address{0xffff};
   std::chrono::milliseconds operation_timeout{2500}; };
 class LibCecDeviceSession final : public DeviceSession {
  public:
-  LibCecDeviceSession(DeviceId, LibCecSessionOptions,
+  LibCecDeviceSession(DeviceId, DeviceSessionConfiguration,
+                      LibCecSessionOptions,
                       LibCecApiFactory = create_real_libcec_api);
   ~LibCecDeviceSession() override;
   [[nodiscard]] const DeviceId& device_id() const noexcept override;

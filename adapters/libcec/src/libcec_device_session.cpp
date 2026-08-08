@@ -18,7 +18,7 @@ std::unique_ptr<LibCecApi> create_real_libcec_api(){return {};}
 #endif
 class LibCecDeviceSession::Impl {
  public:
-  Impl(DeviceId i,LibCecSessionOptions o,LibCecApiFactory f):id(std::move(i)),options(std::move(o)),factory(std::move(f)),worker(&Impl::run,this){}
+  Impl(DeviceId i,DeviceSessionConfiguration c,LibCecSessionOptions o,LibCecApiFactory f):id(std::move(i)),configuration(c),options(std::move(o)),factory(std::move(f)),worker(&Impl::run,this){}
   ~Impl(){{std::lock_guard l(state_mu);observer=nullptr;}disconnect();{std::lock_guard l(mu);stopping=true;}cv.notify_all();worker.join();}
   using Task=std::packaged_task<OperationResult()>;
   OperationResult invoke(std::function<OperationResult()> fn,std::chrono::milliseconds timeout={}){Task t(std::move(fn));auto future=t.get_future();{
@@ -34,21 +34,21 @@ class LibCecDeviceSession::Impl {
     bytes.push_back(static_cast<std::uint8_t>(e.frame.initiator<<4|e.frame.destination));if(e.frame.opcode)bytes.push_back(*e.frame.opcode);
     bytes.insert(bytes.end(),e.frame.parameters.begin(),e.frame.parameters.end());DeviceSessionObserver* o;{std::lock_guard l(state_mu);o=observer;}if(o)o->on_external_cec_frame(id,bytes);}
   void set_state(SessionState s){state_value=s;DeviceSessionObserver* o;{std::lock_guard l(state_mu);o=observer;}if(o)o->on_session_state_changed(id,s);}
-  OperationResult connect(){if(!id.valid()||options.explicit_port.empty()||options.physical_address==0xffff)return OperationResult::InvalidConfiguration;
+  OperationResult connect(){if(!id.valid()||!configuration.valid()||options.explicit_port.empty())return OperationResult::InvalidConfiguration;
     set_state(SessionState::Connecting);auto result=invoke([this]{if(api)api->close();api=factory?factory():nullptr;if(!api)return OperationResult::Unsupported;
       api->set_disconnect_callback([this]{enqueue({.lost=true});});api->set_frame_callback([this](PortableCecFrame f){enqueue({.frame=std::move(f)});});
-      auto r=map_backend_result(api->initialize(options.physical_address));if(r!=OperationResult::Success){api.reset();return r;}
+      auto r=map_backend_result(api->initialize(configuration.physical_address));if(r!=OperationResult::Success){api.reset();return r;}
       r=map_backend_result(api->open(options.explicit_port,std::chrono::milliseconds(5000)));if(r!=OperationResult::Success){api.reset();return r;}
-      {std::lock_guard l(state_mu);snapshot_value.capabilities.cec=true;snapshot_value.addresses.physical=options.physical_address;snapshot_value.addresses.logical=api->logical_address();}
+      {std::lock_guard l(state_mu);snapshot_value.capabilities.cec=true;snapshot_value.addresses.physical=configuration.physical_address;snapshot_value.addresses.logical=api->logical_address();}
       wake=std::make_unique<detail::WakeExtensionClient>([this](auto c,auto q,auto& p,auto timeout){return api->project_transaction(c,q,p,timeout);});return OperationResult::Success;},std::chrono::milliseconds(12000));
     set_state(result==OperationResult::Success?SessionState::Connected:SessionState::Disconnected);return result;}
   OperationResult disconnect(){if(!worker.joinable())return OperationResult::Success;set_state(SessionState::Disconnecting);auto r=invoke([this]{if(api)api->close();api.reset();wake.reset();return OperationResult::Success;});set_state(SessionState::Disconnected);return r;}
   OperationResult op(std::function<BackendResult(LibCecApi&)> f){return invoke([this,f=std::move(f)]{if(!api||state_value!=SessionState::Connected)return OperationResult::Disconnected;return map_backend_result(f(*api));});}
-  DeviceId id;LibCecSessionOptions options;LibCecApiFactory factory;std::unique_ptr<LibCecApi> api;std::unique_ptr<detail::WakeExtensionClient> wake;std::uint16_t wake_physical_address{0xffff};
+  DeviceId id;DeviceSessionConfiguration configuration;LibCecSessionOptions options;LibCecApiFactory factory;std::unique_ptr<LibCecApi> api;std::unique_ptr<detail::WakeExtensionClient> wake;std::uint16_t wake_physical_address{0xffff};
   std::atomic<SessionState> state_value{SessionState::Discovered};mutable std::mutex state_mu;DeviceSessionObserver* observer{};DeviceStateSnapshot snapshot_value{};
   std::mutex mu;std::condition_variable cv;std::deque<Task> tasks;std::deque<Event> events;bool stopping{};std::thread worker;
 };
-LibCecDeviceSession::LibCecDeviceSession(DeviceId i,LibCecSessionOptions o,LibCecApiFactory f):impl_(std::make_unique<Impl>(std::move(i),std::move(o),std::move(f))){}
+LibCecDeviceSession::LibCecDeviceSession(DeviceId i,DeviceSessionConfiguration c,LibCecSessionOptions o,LibCecApiFactory f):impl_(std::make_unique<Impl>(std::move(i),c,std::move(o),std::move(f))){}
 LibCecDeviceSession::~LibCecDeviceSession()=default;const DeviceId& LibCecDeviceSession::device_id()const noexcept{return impl_->id;}
 SessionState LibCecDeviceSession::state()const noexcept{return impl_->state_value.load();}void LibCecDeviceSession::set_observer(DeviceSessionObserver* o){std::lock_guard l(impl_->state_mu);impl_->observer=o;}
 OperationResult LibCecDeviceSession::connect(){return impl_->connect();}OperationResult LibCecDeviceSession::disconnect(){return impl_->disconnect();}

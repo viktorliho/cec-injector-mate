@@ -3,7 +3,9 @@ add_library(cec_injector_mate_libcec_adapter
     src/wake_extension_client.cpp)
 add_library(CECInjector::LibCecAdapter ALIAS cec_injector_mate_libcec_adapter)
 target_include_directories(cec_injector_mate_libcec_adapter PUBLIC include)
-target_link_libraries(cec_injector_mate_libcec_adapter PUBLIC CECInjector::MateCore)
+target_link_libraries(cec_injector_mate_libcec_adapter PUBLIC
+    CECInjector::MateCore
+    CECInjector::MateComposition)
 target_compile_features(cec_injector_mate_libcec_adapter PUBLIC cxx_std_20)
 
 if(CEC_INJECTOR_MATE_BUILD_LIBCEC)
