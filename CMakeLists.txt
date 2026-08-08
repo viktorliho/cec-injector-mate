@@ -8,9 +8,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(CTest)
 
+add_subdirectory(mate-core)
+
 if(BUILD_TESTING)
-    add_test(
-        NAME mate-genesis-sanity
-        COMMAND ${CMAKE_COMMAND} -E true
-    )
+    add_subdirectory(tests)
 endif()

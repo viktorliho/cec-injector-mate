@@ -26,9 +26,11 @@ Device connection.
 
 ## Current status
 
-Experimental. This repository currently contains only the architecture and
-native CMake/CTest foundation. It does not yet contain Mate Core interfaces, a
-DeviceSession adapter, Linux integration, CLI commands, IPC, or a GUI.
+Experimental. The repository contains the portable C++20 boundary foundation:
+common semantic types, DeviceSession and HostPlatform contracts, and the first
+Device selection state model. These APIs are not stable. It does not yet
+contain a production DeviceSession adapter, Linux integration, CLI commands,
+IPC, or a GUI.
 
 See the [architecture contracts](docs/architecture.md),
 [contribution guidelines](CONTRIBUTING.md), and
