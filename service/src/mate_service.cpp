@@ -1,6 +1,7 @@
 #include "cec_injector/mate/mate_service.h"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -59,6 +60,12 @@ bool IsDeviceIntent(PolicyIntent intent) {
   return false;
 }
 
+bool IsRecoverableResumeRefreshResult(OperationResult result) {
+  return result == OperationResult::Timeout ||
+         result == OperationResult::Disconnected ||
+         result == OperationResult::InvalidState;
+}
+
 std::string_view IntentName(PolicyIntent intent) {
   switch (intent) {
     case PolicyIntent::RequestHostSuspend: return "RequestHostSuspend";
@@ -78,7 +85,17 @@ std::string_view IntentName(PolicyIntent intent) {
 }  // namespace
 
 struct MateService::Impl {
-  enum class TaskKind { RefreshDiscovery, Boot, SessionState, Frame, Wake, Host };
+  using Clock = std::chrono::steady_clock;
+
+  enum class TaskKind {
+    RefreshDiscovery,
+    ResumeDeadline,
+    Boot,
+    SessionState,
+    Frame,
+    Wake,
+    Host,
+  };
   struct Task {
     explicit Task(TaskKind value) : kind(value) {}
     Task(TaskKind value, std::uint64_t token, DeviceId id)
@@ -90,6 +107,17 @@ struct MateService::Impl {
     std::vector<std::uint8_t> frame;
     WakeState wake;
     std::optional<HostLifecycleNotification> host;
+  };
+
+  struct ResumeRecovery {
+    std::uint64_t epoch{};
+    DeviceId device;
+    std::uint64_t selection_epoch{};
+    Clock::time_point deadline;
+    PolicyPlan plan;
+    std::vector<OperationResult> results;
+    std::size_t refresh_index{};
+    std::size_t next_step{};
   };
 
   class SessionObserver final : public DeviceSessionObserver {
@@ -135,6 +163,7 @@ struct MateService::Impl {
       : host(host_value), factory(factory_value),
         registry(), policy(configuration.policy), events(32),
         explicit_selection(std::move(configuration.selected_device)),
+        resume_recovery_timeout(configuration.resume_recovery_timeout),
         diagnostics(std::move(sink)) {}
 
   void log(std::string_view message) {
@@ -158,7 +187,15 @@ struct MateService::Impl {
       Task task{TaskKind::RefreshDiscovery};
       {
         std::unique_lock lock(mutex);
-        changed.wait(lock, [this] { return stopping || !tasks.empty(); });
+        if (!stopping && tasks.empty() && resume_recovery) {
+          if (!changed.wait_until(
+                  lock, resume_recovery->deadline,
+                  [this] { return stopping || !tasks.empty(); })) {
+            tasks.emplace_back(TaskKind::ResumeDeadline);
+          }
+        } else {
+          changed.wait(lock, [this] { return stopping || !tasks.empty(); });
+        }
         if (stopping && tasks.empty()) break;
         task = std::move(tasks.front());
         tasks.pop_front();
@@ -176,6 +213,7 @@ struct MateService::Impl {
   void handle(Task task) {
     switch (task.kind) {
       case TaskKind::RefreshDiscovery: reconcile_discovery(); break;
+      case TaskKind::ResumeDeadline: expire_resume_recovery(); break;
       case TaskKind::Boot: execute_event(LifecycleEvent::BootRequested, nullptr); break;
       case TaskKind::SessionState: handle_session_state(task); break;
       case TaskKind::Frame: handle_frame(task); break;
@@ -191,6 +229,7 @@ struct MateService::Impl {
   }
 
   void reconcile_discovery() {
+    expire_resume_recovery();
     auto discovered = host.discovered_devices();
     inventory = discovered;
     std::vector<DeviceId> ids;
@@ -202,6 +241,7 @@ struct MateService::Impl {
                   std::to_string(discovered.size()));
     }
     const auto intents = registry.update_discovered(std::move(ids));
+    update_selection_episode();
     for (const auto& intent : intents) {
       if (intent.kind == CoreIntentKind::DisconnectDevice) {
         drop_session();
@@ -222,6 +262,17 @@ struct MateService::Impl {
       drop_session();
       establish_session(*selected);
     }
+  }
+
+  void update_selection_episode() {
+    const auto& snapshot = registry.snapshot();
+    const auto target = snapshot.explicit_selection
+        ? snapshot.explicit_selection
+        : snapshot.selected_active;
+    if (target == selection_device) return;
+    selection_device = target;
+    ++selection_epoch;
+    if (resume_recovery) cancel_resume_recovery("selection changed");
   }
 
   const DiscoveredDevice* find_device(const DeviceId& id) const {
@@ -300,8 +351,10 @@ struct MateService::Impl {
     if (!active_device_id || task.device != *active_device_id ||
         task.generation != active_generation) return;
     if (task.session_state == SessionState::Connected) {
+      expire_resume_recovery();
       execute_event(LifecycleEvent::SessionConnected, nullptr,
                     task.generation);
+      continue_resume_recovery(task);
     } else if (task.session_state == SessionState::Disconnected) {
       execute_event(LifecycleEvent::SessionLost, nullptr, task.generation);
       const auto desired = registry.snapshot().selected_active;
@@ -347,15 +400,18 @@ struct MateService::Impl {
     log("host lifecycle notification");
     switch (notification.event) {
       case HostLifecycleEvent::PreparingSuspend:
+        cancel_resume_recovery("host preparing suspend");
         execute_event(LifecycleEvent::HostPreparingSuspend,
                       notification.transition_hold
                           ? &*notification.transition_hold
                           : nullptr);
         break;
       case HostLifecycleEvent::Resumed:
+        cancel_resume_recovery("superseded by HostResumed");
         execute_event(LifecycleEvent::HostResumed, nullptr);
         break;
       case HostLifecycleEvent::PreparingShutdown:
+        cancel_resume_recovery("host preparing shutdown");
         execute_event(LifecycleEvent::HostPreparingShutdown,
                       notification.transition_hold
                           ? &*notification.transition_hold
@@ -382,6 +438,11 @@ struct MateService::Impl {
     }
     const auto plan_generation = event_generation.value_or(generation.load());
     const auto plan = policy.handle(*active);
+    if (event == LifecycleEvent::HostResumed) {
+      execute_resume_plan(plan, plan_generation);
+      events.complete_active();
+      return;
+    }
     std::vector<OperationResult> results;
     results.reserve(plan.steps.size());
     for (const auto& step : plan.steps) {
@@ -399,16 +460,154 @@ struct MateService::Impl {
         result = execute_intent(step.intent, hold);
       }
       results.push_back(result);
-      policy.record_result(step.intent, result);
-      if (diagnostics) {
-        const auto message = std::string("policy intent ") +
-            std::string(IntentName(step.intent)) + " result " +
-            std::to_string(static_cast<int>(result));
-        diagnostics(message);
-      }
+      record_intent_result(step.intent, result);
     }
     events.complete_active();
     if (hold && hold->active()) (void)hold->complete();
+  }
+
+  void record_intent_result(PolicyIntent intent, OperationResult result) {
+    policy.record_result(intent, result);
+    if (diagnostics) {
+      const auto message = std::string("policy intent ") +
+          std::string(IntentName(intent)) + " result " +
+          std::to_string(static_cast<int>(result));
+      diagnostics(message);
+    }
+  }
+
+  OperationResult execute_plan_step(const PolicyStep& step,
+                                    std::vector<OperationResult>& results,
+                                    std::uint64_t plan_generation,
+                                    HostTransitionHold* hold = nullptr) {
+    OperationResult result = OperationResult::InvalidState;
+    if (step.requires_success &&
+        (*step.requires_success >= results.size() ||
+         results[*step.requires_success] != OperationResult::Success)) {
+      result = OperationResult::Rejected;
+    } else if (IsDeviceIntent(step.intent) &&
+               (generation.load() != plan_generation || !session ||
+                active_generation != plan_generation)) {
+      result = OperationResult::Disconnected;
+      log("discarded stale Device work");
+    } else {
+      result = execute_intent(step.intent, hold);
+    }
+    results.push_back(result);
+    record_intent_result(step.intent, result);
+    return result;
+  }
+
+  void execute_resume_plan(const PolicyPlan& plan,
+                           std::uint64_t plan_generation) {
+    std::vector<OperationResult> results;
+    results.reserve(plan.steps.size());
+    for (std::size_t index = 0; index < plan.steps.size(); ++index) {
+      const auto result = execute_plan_step(plan.steps[index], results,
+                                            plan_generation);
+      if (plan.steps[index].intent != PolicyIntent::RefreshDeviceSession ||
+          !IsRecoverableResumeRefreshResult(result)) {
+        continue;
+      }
+      const auto selected = selection_device
+          ? selection_device
+          : registry.snapshot().selected_active;
+      if (!selected) continue;
+      ResumeRecovery pending;
+      pending.epoch = ++resume_epoch;
+      pending.device = *selected;
+      pending.selection_epoch = selection_epoch;
+      pending.deadline = Clock::now() + resume_recovery_timeout;
+      pending.plan = plan;
+      pending.results = std::move(results);
+      pending.refresh_index = index;
+      pending.next_step = index + 1;
+      resume_recovery.emplace(std::move(pending));
+      if (diagnostics) {
+        diagnostics(std::string("Resume recovery pending epoch ") +
+                    std::to_string(resume_recovery->epoch));
+      }
+      return;
+    }
+  }
+
+  void continue_resume_recovery(const Task& task) {
+    if (!resume_recovery || task.device != resume_recovery->device ||
+        task.generation != active_generation ||
+        generation.load() != task.generation) {
+      return;
+    }
+    if (resume_recovery->selection_epoch != selection_epoch ||
+        selection_device != std::optional<DeviceId>(task.device)) {
+      cancel_resume_recovery("selection changed");
+      return;
+    }
+    if (Clock::now() >= resume_recovery->deadline) {
+      expire_resume_recovery();
+      return;
+    }
+    log("Resume recovery session restored");
+    const auto refresh = execute_intent(PolicyIntent::RefreshDeviceSession,
+                                        nullptr);
+    resume_recovery->results[resume_recovery->refresh_index] = refresh;
+    record_intent_result(PolicyIntent::RefreshDeviceSession, refresh);
+    if (IsRecoverableResumeRefreshResult(refresh)) return;
+    if (refresh == OperationResult::Success && diagnostics) {
+      diagnostics(std::string("Resume continuation generation ") +
+                  std::to_string(task.generation));
+    }
+    const auto continuation_generation = task.generation;
+    while (resume_recovery &&
+           resume_recovery->next_step < resume_recovery->plan.steps.size()) {
+      const auto index = resume_recovery->next_step++;
+      const auto& step = resume_recovery->plan.steps[index];
+      if (IsDeviceIntent(step.intent) &&
+          (generation.load() != continuation_generation || !session ||
+           active_generation != continuation_generation)) {
+        cancel_resume_recovery("session generation changed");
+        return;
+      }
+      OperationResult result = OperationResult::InvalidState;
+      if (step.requires_success &&
+          (*step.requires_success >= resume_recovery->results.size() ||
+           resume_recovery->results[*step.requires_success] !=
+               OperationResult::Success)) {
+        result = OperationResult::Rejected;
+      } else {
+        result = execute_intent(step.intent, nullptr);
+      }
+      resume_recovery->results.push_back(result);
+      record_intent_result(step.intent, result);
+      if (IsDeviceIntent(step.intent) &&
+          generation.load() != continuation_generation) {
+        cancel_resume_recovery("session generation changed");
+        return;
+      }
+    }
+    resume_recovery.reset();
+  }
+
+  void expire_resume_recovery() {
+    if (!resume_recovery || Clock::now() < resume_recovery->deadline) return;
+    log("Resume recovery expired");
+    finish_cancelled_resume();
+  }
+
+  void cancel_resume_recovery(std::string_view reason) {
+    if (!resume_recovery) return;
+    if (diagnostics) {
+      diagnostics(std::string("Resume recovery cancelled ") +
+                  std::string(reason));
+    }
+    finish_cancelled_resume();
+  }
+
+  void finish_cancelled_resume() {
+    if (!resume_recovery) return;
+    const auto complete = execute_intent(PolicyIntent::CompleteHostTransition,
+                                         nullptr);
+    record_intent_result(PolicyIntent::CompleteHostTransition, complete);
+    resume_recovery.reset();
   }
 
   OperationResult execute_intent(PolicyIntent intent, HostTransitionHold* hold) {
@@ -467,15 +666,20 @@ struct MateService::Impl {
   PolicyStateMachine policy;
   SemanticEventQueue events;
   std::optional<DeviceId> explicit_selection;
+  const std::chrono::milliseconds resume_recovery_timeout;
   DiagnosticSink diagnostics;
   std::vector<DiscoveredDevice> inventory;
   std::unique_ptr<DeviceSession> session;
   std::unique_ptr<SessionObserver> session_observer;
   std::optional<DeviceId> active_device_id;
+  std::optional<DeviceId> selection_device;
   std::optional<SemanticRemoteAction> active_remote_action;
   WakeState last_wake_state;
   std::uint16_t active_physical_address{0xffff};
   std::uint64_t active_generation{};
+  std::uint64_t selection_epoch{};
+  std::uint64_t resume_epoch{};
+  std::optional<ResumeRecovery> resume_recovery;
   std::atomic<std::uint64_t> generation{};
   mutable std::mutex mutex;
   std::condition_variable changed;
@@ -524,6 +728,7 @@ void MateService::shutdown() noexcept {
   }
   impl_->changed.notify_all();
   if (impl_->worker.joinable()) impl_->worker.join();
+  impl_->cancel_resume_recovery("service stop");
   impl_->events.clear();
   impl_->drop_session();
   (void)impl_->host.reset_remote_input();

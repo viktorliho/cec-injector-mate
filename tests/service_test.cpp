@@ -1,6 +1,7 @@
 #include "cec_injector/mate/mate_service.h"
 
 #include <memory>
+#include <chrono>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -36,12 +37,19 @@ struct SessionRecord {
   int wake_clears{};
   bool lose_on_power{};
   bool lose_on_wake{};
+  OperationResult refresh_result{OperationResult::Success};
+  OperationResult power_result{OperationResult::Success};
   OperationResult wake_configure_result{OperationResult::Success};
   std::vector<std::string> operations;
 
   void frame(std::initializer_list<std::uint8_t> bytes) {
     const std::vector<std::uint8_t> frame_value(bytes);
     if (observer) observer->on_external_cec_frame(id, frame_value);
+  }
+
+  void change_state(SessionState value) {
+    state = value;
+    if (observer) observer->on_session_state_changed(id, value);
   }
 };
 
@@ -75,17 +83,18 @@ class FakeSession final : public DeviceSession {
   OperationResult refresh_state() override {
     ++record_->refreshes;
     record_->operations.push_back("refresh");
-    return OperationResult::Success;
+    return record_->refresh_result;
   }
   DeviceStateSnapshot snapshot() const override { return record_->snapshot; }
   OperationResult power_on_tv() override {
     ++record_->powers;
     record_->operations.push_back("power");
-    if (record_->lose_on_power && record_->observer) {
+    if (record_->power_result == OperationResult::Success &&
+        record_->lose_on_power && record_->observer) {
       record_->state = SessionState::Disconnected;
       record_->observer->on_session_state_changed(record_->id, record_->state);
     }
-    return OperationResult::Success;
+    return record_->power_result;
   }
   OperationResult standby_tv() override {
     ++record_->standbys;
@@ -149,12 +158,18 @@ class FakeFactory final : public DeviceSessionFactory {
     auto record = std::make_shared<SessionRecord>();
     record->id = device.id;
     record->snapshot.addresses.physical = configuration.physical_address;
+    record->refresh_result = next_refresh_result;
+    record->power_result = next_power_result;
+    record->lose_on_power = next_lose_on_power;
     records.push_back(record);
     return std::make_unique<FakeSession>(record);
   }
 
   int calls{};
   bool fail{};
+  OperationResult next_refresh_result{OperationResult::Success};
+  OperationResult next_power_result{OperationResult::Success};
+  bool next_lose_on_power{};
   std::vector<DeviceSessionConfiguration> configurations;
   std::vector<DiscoveredDevice> devices;
   std::vector<std::shared_ptr<SessionRecord>> records;
@@ -430,6 +445,330 @@ void TestWakeAuthorizationAndHoldCancellation() {
   service.shutdown();
 }
 
+MateServiceConfiguration ResumeConfiguration(
+    std::chrono::milliseconds timeout = std::chrono::seconds(30)) {
+  MateServiceConfiguration configuration;
+  configuration.policy.power_on_resume = true;
+  configuration.policy.wake_host_on_tv_source_request = true;
+  configuration.resume_recovery_timeout = timeout;
+  return configuration;
+}
+
+std::shared_ptr<SessionRecord> RecoverSameDevice(
+    MateService& service, FakeFactory& factory,
+    const std::shared_ptr<SessionRecord>& lost) {
+  const auto recovered_index = factory.records.size();
+  factory.fail = true;
+  lost->change_state(SessionState::Disconnected);
+  service.wait_idle();
+  REQUIRE(!service.has_active_session());
+  factory.fail = false;
+  service.refresh_discovery();
+  service.wait_idle();
+  REQUIRE(service.has_active_session());
+  REQUIRE(factory.records.size() > recovered_index);
+  return factory.records[recovered_index];
+}
+
+bool HasDiagnostic(const std::vector<std::string>& diagnostics,
+                   std::string_view fragment) {
+  for (const auto& diagnostic : diagnostics) {
+    if (diagnostic.find(fragment) != std::string::npos) return true;
+  }
+  return false;
+}
+
+std::size_t CountDiagnostic(const std::vector<std::string>& diagnostics,
+                            std::string_view exact) {
+  std::size_t count = 0;
+  for (const auto& diagnostic : diagnostics) {
+    if (diagnostic == exact) ++count;
+  }
+  return count;
+}
+
+void TestResumeRecoveryImmediateAndDelayed() {
+  {
+    FakeHost host;
+    FakeFactory factory;
+    host.inventory = {Device("a", "opaque-a")};
+    MateService service(host, factory, ResumeConfiguration());
+    REQUIRE(service.start() == OperationResult::Success);
+    service.wait_idle();
+    auto record = factory.records.back();
+    host.lifecycle(HostLifecycleEvent::Resumed);
+    service.wait_idle();
+    REQUIRE(record->refreshes == 1);
+    REQUIRE(record->powers == 1);
+    REQUIRE(record->active_sources == 1);
+    REQUIRE(record->wake_reads == 1);
+    service.shutdown();
+  }
+
+  FakeHost host;
+  FakeFactory factory;
+  std::vector<std::string> diagnostics;
+  host.inventory = {Device("a", "opaque-a")};
+  MateService service(host, factory, ResumeConfiguration(),
+                      [&](std::string_view message) {
+                        diagnostics.emplace_back(message);
+                      });
+  REQUIRE(service.start() == OperationResult::Success);
+  service.wait_idle();
+  auto first = factory.records.back();
+  first->refresh_result = OperationResult::Timeout;
+  host.lifecycle(HostLifecycleEvent::Resumed);
+  service.wait_idle();
+  REQUIRE(first->refreshes == 1);
+  REQUIRE(first->powers == 0 && first->active_sources == 0);
+  REQUIRE(HasDiagnostic(diagnostics, "Resume recovery pending"));
+
+  auto recovered = RecoverSameDevice(service, factory, first);
+  REQUIRE(recovered != first);
+  REQUIRE(recovered->refreshes == 1);
+  REQUIRE(recovered->powers == 1);
+  REQUIRE(recovered->active_sources == 1);
+  REQUIRE(recovered->wake_reads == 1);
+  REQUIRE(HasDiagnostic(diagnostics, "Resume recovery session restored"));
+  REQUIRE(HasDiagnostic(diagnostics, "Resume continuation generation"));
+  REQUIRE(CountDiagnostic(
+              diagnostics,
+              "policy intent RefreshDeviceSession result 5") == 1);
+  REQUIRE(CountDiagnostic(
+              diagnostics,
+              "policy intent RefreshDeviceSession result 0") == 1);
+  REQUIRE(CountDiagnostic(diagnostics,
+                          "policy intent PowerOnTv result 0") == 1);
+  REQUIRE(CountDiagnostic(diagnostics,
+                          "policy intent MakeActiveSource result 0") == 1);
+  REQUIRE(CountDiagnostic(diagnostics,
+                          "policy intent ReadWakeReason result 0") == 1);
+  REQUIRE(CountDiagnostic(
+              diagnostics,
+              "policy intent CompleteHostTransition result 0") == 1);
+
+  recovered->change_state(SessionState::Connected);
+  service.wait_idle();
+  REQUIRE(recovered->powers == 1);
+  REQUIRE(recovered->active_sources == 1);
+  service.shutdown();
+}
+
+void TestResumeRecoveryExpiryAndSelectionCancellation() {
+  {
+    FakeHost host;
+    FakeFactory factory;
+    std::vector<std::string> diagnostics;
+    host.inventory = {Device("a", "opaque-a")};
+    MateService service(host, factory,
+                        ResumeConfiguration(std::chrono::milliseconds::zero()),
+                        [&](std::string_view message) {
+                          diagnostics.emplace_back(message);
+                        });
+    REQUIRE(service.start() == OperationResult::Success);
+    service.wait_idle();
+    auto first = factory.records.back();
+    first->refresh_result = OperationResult::Timeout;
+    host.lifecycle(HostLifecycleEvent::Resumed);
+    service.wait_idle();
+    REQUIRE(first->powers == 0);
+    service.refresh_discovery();
+    service.wait_idle();
+    REQUIRE(HasDiagnostic(diagnostics, "Resume recovery expired"));
+    auto recovered = RecoverSameDevice(service, factory, first);
+    REQUIRE(recovered->powers == 0 && recovered->active_sources == 0);
+    service.shutdown();
+  }
+
+  FakeHost host;
+  FakeFactory factory;
+  std::vector<std::string> diagnostics;
+  host.inventory = {Device("a", "opaque-a")};
+  MateService service(host, factory, ResumeConfiguration(),
+                      [&](std::string_view message) {
+                        diagnostics.emplace_back(message);
+                      });
+  REQUIRE(service.start() == OperationResult::Success);
+  service.wait_idle();
+  auto first = factory.records.back();
+  first->refresh_result = OperationResult::Disconnected;
+  host.lifecycle(HostLifecycleEvent::Resumed);
+  service.wait_idle();
+  host.inventory = {Device("b", "opaque-b")};
+  service.refresh_discovery();
+  service.wait_idle();
+  REQUIRE(HasDiagnostic(diagnostics,
+                        "Resume recovery cancelled selection changed"));
+  host.inventory.clear();
+  service.refresh_discovery();
+  service.wait_idle();
+  host.inventory = {Device("b", "opaque-b")};
+  service.refresh_discovery();
+  service.wait_idle();
+  REQUIRE(factory.records.back()->id == DeviceId("b"));
+  REQUIRE(factory.records.back()->powers == 0);
+  REQUIRE(factory.records.back()->active_sources == 0);
+  service.shutdown();
+}
+
+void TestResumeRecoveryLifecycleCancellation() {
+  for (const auto event : {HostLifecycleEvent::PreparingSuspend,
+                           HostLifecycleEvent::PreparingShutdown}) {
+    FakeHost host;
+    FakeFactory factory;
+    std::vector<std::string> diagnostics;
+    host.inventory = {Device("a", "opaque-a")};
+    MateService service(host, factory, ResumeConfiguration(),
+                        [&](std::string_view message) {
+                          diagnostics.emplace_back(message);
+                        });
+    REQUIRE(service.start() == OperationResult::Success);
+    service.wait_idle();
+    auto first = factory.records.back();
+    first->refresh_result = OperationResult::InvalidState;
+    host.lifecycle(HostLifecycleEvent::Resumed);
+    service.wait_idle();
+    host.lifecycle(event);
+    service.wait_idle();
+    REQUIRE(HasDiagnostic(diagnostics, "Resume recovery cancelled host"));
+    auto recovered = RecoverSameDevice(service, factory, first);
+    REQUIRE(recovered->powers == 0 && recovered->active_sources == 0);
+    service.shutdown();
+  }
+
+  FakeHost host;
+  FakeFactory factory;
+  std::vector<std::string> diagnostics;
+  host.inventory = {Device("a", "opaque-a")};
+  MateService service(host, factory, ResumeConfiguration(),
+                      [&](std::string_view message) {
+                        diagnostics.emplace_back(message);
+                      });
+  REQUIRE(service.start() == OperationResult::Success);
+  service.wait_idle();
+  factory.records.back()->refresh_result = OperationResult::Timeout;
+  host.lifecycle(HostLifecycleEvent::Resumed);
+  service.wait_idle();
+  service.shutdown();
+  REQUIRE(HasDiagnostic(diagnostics, "Resume recovery cancelled service stop"));
+
+  FakeHost supersede_host;
+  FakeFactory supersede_factory;
+  std::vector<std::string> supersede_diagnostics;
+  supersede_host.inventory = {Device("a", "opaque-a")};
+  MateService supersede(
+      supersede_host, supersede_factory, ResumeConfiguration(),
+      [&](std::string_view message) {
+        supersede_diagnostics.emplace_back(message);
+      });
+  REQUIRE(supersede.start() == OperationResult::Success);
+  supersede.wait_idle();
+  auto supersede_record = supersede_factory.records.back();
+  supersede_record->refresh_result = OperationResult::Timeout;
+  supersede_host.lifecycle(HostLifecycleEvent::Resumed);
+  supersede.wait_idle();
+  supersede_record->refresh_result = OperationResult::Success;
+  supersede_host.lifecycle(HostLifecycleEvent::Resumed);
+  supersede.wait_idle();
+  REQUIRE(HasDiagnostic(
+      supersede_diagnostics,
+      "Resume recovery cancelled superseded by HostResumed"));
+  REQUIRE(supersede_record->powers == 1);
+  REQUIRE(supersede_record->active_sources == 1);
+  supersede.shutdown();
+}
+
+void TestResumeRecoveryGenerationAndFailures() {
+  {
+    FakeHost host;
+    FakeFactory factory;
+    std::vector<std::string> diagnostics;
+    host.inventory = {Device("a", "opaque-a")};
+    MateService service(host, factory, ResumeConfiguration(),
+                        [&](std::string_view message) {
+                          diagnostics.emplace_back(message);
+                        });
+    REQUIRE(service.start() == OperationResult::Success);
+    service.wait_idle();
+    auto first = factory.records.back();
+    first->refresh_result = OperationResult::Timeout;
+    host.lifecycle(HostLifecycleEvent::Resumed);
+    service.wait_idle();
+    factory.next_lose_on_power = true;
+    auto recovered = RecoverSameDevice(service, factory, first);
+    REQUIRE(recovered->powers == 1);
+    REQUIRE(recovered->active_sources == 0);
+    REQUIRE(HasDiagnostic(
+        diagnostics, "Resume recovery cancelled session generation changed"));
+    service.wait_idle();
+    REQUIRE(factory.records.back()->powers == 0);
+    service.shutdown();
+  }
+
+  {
+    FakeHost host;
+    FakeFactory factory;
+    host.inventory = {Device("a", "opaque-a")};
+    MateService service(host, factory, ResumeConfiguration());
+    REQUIRE(service.start() == OperationResult::Success);
+    service.wait_idle();
+    auto first = factory.records.back();
+    first->refresh_result = OperationResult::Timeout;
+    host.lifecycle(HostLifecycleEvent::Resumed);
+    service.wait_idle();
+    factory.next_power_result = OperationResult::Rejected;
+    auto recovered = RecoverSameDevice(service, factory, first);
+    REQUIRE(recovered->powers == 1);
+    REQUIRE(recovered->active_sources == 0);
+    service.shutdown();
+  }
+
+  for (const auto terminal : {OperationResult::Unsupported,
+                              OperationResult::InvalidConfiguration,
+                              OperationResult::Rejected,
+                              OperationResult::MalformedResponse,
+                              OperationResult::PermissionDenied,
+                              OperationResult::InternalError}) {
+    FakeHost host;
+    FakeFactory factory;
+    std::vector<std::string> diagnostics;
+    host.inventory = {Device("a", "opaque-a")};
+    MateService service(host, factory, ResumeConfiguration(),
+                        [&](std::string_view message) {
+                          diagnostics.emplace_back(message);
+                        });
+    REQUIRE(service.start() == OperationResult::Success);
+    service.wait_idle();
+    auto record = factory.records.back();
+    record->refresh_result = terminal;
+    host.lifecycle(HostLifecycleEvent::Resumed);
+    service.wait_idle();
+    REQUIRE(record->powers == 0 && record->active_sources == 0);
+    REQUIRE(!HasDiagnostic(diagnostics, "Resume recovery pending"));
+    service.shutdown();
+  }
+}
+
+void TestReconnectAndRestartNeverReplayResume() {
+  FakeHost host;
+  FakeFactory factory;
+  host.inventory = {Device("a", "opaque-a")};
+  MateService service(host, factory, ResumeConfiguration());
+  REQUIRE(service.start() == OperationResult::Success);
+  service.wait_idle();
+  auto first = factory.records.back();
+  auto recovered = RecoverSameDevice(service, factory, first);
+  REQUIRE(recovered->powers == 0 && recovered->active_sources == 0);
+  service.shutdown();
+
+  MateService restarted(host, factory, ResumeConfiguration());
+  REQUIRE(restarted.start() == OperationResult::Success);
+  restarted.wait_idle();
+  REQUIRE(factory.records.back()->powers == 0);
+  REQUIRE(factory.records.back()->active_sources == 0);
+  restarted.shutdown();
+}
+
 }  // namespace
 
 int main() {
@@ -438,5 +777,10 @@ int main() {
   TestGenerationAndBoot();
   TestWakeFailureStillCompletesTransition();
   TestWakeAuthorizationAndHoldCancellation();
+  TestResumeRecoveryImmediateAndDelayed();
+  TestResumeRecoveryExpiryAndSelectionCancellation();
+  TestResumeRecoveryLifecycleCancellation();
+  TestResumeRecoveryGenerationAndFailures();
+  TestReconnectAndRestartNeverReplayResume();
   return EXIT_SUCCESS;
 }

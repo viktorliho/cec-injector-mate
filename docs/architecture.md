@@ -82,6 +82,13 @@ composition. Logging belongs to Service diagnostics and platform integration.
 System-service integration belongs to packaging, while
 SteamOS persistence and repair belong specifically to `packaging/steamos`.
 
+Core Resume policy retains semantic dependency ordering. Mate Service may hold
+one bounded Resume recovery transaction while the same selected Device is
+temporarily unavailable, then continue the remaining plan against a newly
+validated current session generation. A plain reconnect never creates Resume
+semantics, and expiry, selection change, host transition, or shutdown cancels
+the transaction before any later TV action.
+
 Live/cache physical-address provenance, richer authorization diagnostics,
 cache topology identity, and asynchronous suspend diagnostics remain future
 implementation concerns; they do not expand the HostPlatform contract here.

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -16,6 +17,8 @@ namespace cec_injector::mate {
 struct MateServiceConfiguration {
   PolicyConfiguration policy;
   std::optional<DeviceId> selected_device;
+  std::chrono::milliseconds resume_recovery_timeout{
+      std::chrono::seconds(30)};
 };
 
 class MateService final : public HostLifecycleObserver {
