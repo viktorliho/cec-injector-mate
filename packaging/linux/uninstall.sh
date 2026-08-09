@@ -17,10 +17,7 @@ if test -z "$root"; then
       test "$(cat "$device/serial")" = "$CEC_MATE_SERIAL" || continue
       test ! -w "$device/power/wakeup" || printf '%s\n' disabled >"$device/power/wakeup"
     done
-    selected=$(find /dev/serial/by-id -maxdepth 1 -type l -name "*${CEC_MATE_SERIAL}*" -print 2>/dev/null | head -n 1)
-    test -z "$selected" || setfacl -x u:cec-injector-mate "$(readlink -f "$selected")" 2>/dev/null || true
   fi
-  setfacl -x u:cec-injector-mate /dev/uinput /dev/dri/card* 2>/dev/null || true
 fi
 
 rm -f -- \
@@ -28,6 +25,8 @@ rm -f -- \
   "${root}/etc/systemd/system/cec-injector-mate-boot.service" \
   "${root}/etc/udev/rules.d/70-cec-injector-mate-device.rules" \
   "${root}/etc/udev/rules.d/70-cec-injector-mate-platform.rules" \
+  "${root}/etc/udev/rules.d/80-cec-injector-mate-device.rules" \
+  "${root}/etc/udev/rules.d/80-cec-injector-mate-platform.rules" \
   "${root}/etc/udev/rules.d/71-cec-injector-mate-wakeup.rules" \
   "${root}/etc/polkit-1/rules.d/49-cec-injector-mate-suspend.rules"
 rm -rf -- "${root}/opt/cec-injector-mate"
@@ -40,6 +39,9 @@ fi
 
 systemctl daemon-reload
 udevadm control --reload-rules
+udevadm trigger --subsystem-match=tty --action=change
+udevadm trigger --subsystem-match=misc --sysname-match=uinput --action=change
 udevadm settle
 if id cec-injector-mate >/dev/null 2>&1; then userdel cec-injector-mate; fi
+if getent group cec-injector-mate >/dev/null 2>&1; then groupdel cec-injector-mate; fi
 echo "configuration and state preserved under /etc and /var/lib; use --purge-state only for state"

@@ -28,6 +28,20 @@ device=$(find /dev/serial/by-id -maxdepth 1 -type l -name "*${CEC_MATE_SERIAL}*"
 test "$(printf '%s\n' "$device" | sed '/^$/d' | wc -l)" -eq 1 && echo "PASS selected Device visible" || { echo "FAIL selected Device visible"; fail=1; }
 runuser -u cec-injector-mate -- test -r "$device" && runuser -u cec-injector-mate -- test -w "$device" && echo "PASS serial access" || { echo "FAIL serial access"; fail=1; }
 runuser -u cec-injector-mate -- test -r /dev/uinput && runuser -u cec-injector-mate -- test -w /dev/uinput && echo "PASS uinput access" || { echo "FAIL uinput access"; fail=1; }
+drm_access=false
+for card in /dev/dri/card*; do
+  test -c "$card" || continue
+  if runuser -u cec-injector-mate -G video -- test -r "$card"; then drm_access=true; break; fi
+done
+$drm_access && echo "PASS DRM primary-node access" || { echo "FAIL DRM primary-node access"; fail=1; }
+video_gid=$(getent group video | cut -d: -f3)
+main_pid=$(systemctl show -p MainPID --value "$service")
+if test "$main_pid" -gt 0 && grep -E "^Groups:.*(^|[[:space:]])${video_gid}([[:space:]]|$)" "/proc/$main_pid/status" >/dev/null; then
+  echo "PASS daemon DRM primary-node group"
+else
+  echo "FAIL daemon DRM primary-node group"
+  fail=1
+fi
 virtual_inputs=$(grep -lFx 'CEC Injector Mate Remote' /sys/class/input/*/name 2>/dev/null | wc -l)
 test "$virtual_inputs" -eq 1 && echo "PASS uinput backend healthy" || { echo "FAIL uinput backend count $virtual_inputs"; fail=1; }
 systemd-inhibit --list --no-pager | grep -Fq cec-injector-mate && echo "PASS lifecycle inhibitors" || { echo "FAIL lifecycle inhibitors"; fail=1; }

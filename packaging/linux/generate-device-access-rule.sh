@@ -16,4 +16,4 @@ esac
 
 vendor=$(printf '%s' "$vendor" | tr 'A-F' 'a-f')
 product=$(printf '%s' "$product" | tr 'A-F' 'a-f')
-printf '%s\n' "ACTION==\"add|change\", SUBSYSTEM==\"tty\", ATTRS{idVendor}==\"$vendor\", ATTRS{idProduct}==\"$product\", ATTRS{serial}==\"$serial\", RUN+=\"/usr/bin/setfacl -m u:$service_user:rw /dev/%k\""
+printf '%s\n' "ACTION==\"add|change\", SUBSYSTEM==\"tty\", ATTRS{idVendor}==\"$vendor\", ATTRS{idProduct}==\"$product\", ATTRS{serial}==\"$serial\", GROUP=\"$service_user\", MODE=\"0660\", TAG-=\"uaccess\""

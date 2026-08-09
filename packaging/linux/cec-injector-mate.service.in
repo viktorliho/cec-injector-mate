@@ -1,19 +1,20 @@
 [Unit]
 Description=CEC Injector Mate
 After=cec-injector-mate-boot.service systemd-udevd.service dbus.service
+StartLimitIntervalSec=60s
+StartLimitBurst=3
 
 [Service]
 Type=simple
 User=cec-injector-mate
 Group=cec-injector-mate
+SupplementaryGroups=video
 RuntimeDirectory=cec-injector-mate
 StateDirectory=cec-injector-mate
 UMask=0077
 ExecStart=@EXECUTABLE@ --device-id @DEVICE_ID@ --pa-cache /var/lib/cec-injector-mate/physical-address --uinput /dev/uinput --remote-profile steamos-parity --power-on-boot --power-on-resume --standby-on-suspend --standby-on-shutdown --suspend-on-tv-standby --wake-host-on-tv-source-request
 Restart=on-failure
 RestartSec=5s
-StartLimitIntervalSec=60s
-StartLimitBurst=3
 TimeoutStopSec=15s
 NoNewPrivileges=yes
 CapabilityBoundingSet=

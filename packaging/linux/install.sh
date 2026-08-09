@@ -22,7 +22,7 @@ test -f "$bundle/MANIFEST.txt" || { echo "bundle manifest is required" >&2; exit
 test -z "$root" || test "${root#/}" != "$root" || { echo "CEC_MATE_ROOT must be absolute" >&2; exit 2; }
 if test -z "$root"; then
   test "$(id -u)" -eq 0 || { echo "installation requires root" >&2; exit 1; }
-  for prerequisite in od setfacl udevadm systemctl useradd runuser journalctl systemd-inhibit sha256sum; do
+  for prerequisite in od udevadm systemctl useradd runuser journalctl systemd-inhibit sha256sum; do
     command -v "$prerequisite" >/dev/null || { echo "missing prerequisite: $prerequisite" >&2; exit 1; }
   done
   if systemctl is-active --quiet linux-hdmi-cec.service 2>/dev/null; then
@@ -71,6 +71,12 @@ if test -z "$root" && ! id "$service_user" >/dev/null 2>&1; then
   useradd --system --home-dir /var/lib/cec-injector-mate --create-home \
     --shell /usr/bin/nologin --user-group "$service_user"
 fi
+if test -z "$root"; then
+  test "$(id -gn "$service_user")" = "$service_user" || {
+    echo "existing service account has an unexpected primary group" >&2; exit 1;
+  }
+  getent group video >/dev/null || { echo "missing required DRM primary-node group: video" >&2; exit 1; }
+fi
 
 stage="${root}${release}.new"
 rm -rf -- "$stage"
@@ -101,15 +107,16 @@ install -m 0644 "$config_tmp" "${root}/etc/cec-injector-mate/installation.conf"
 
 install -d -m 0755 "${root}/etc/udev/rules.d" "${root}/etc/polkit-1/rules.d" \
   "${root}/etc/systemd/system"
-printf '%s\n' "$serial_rule" >"${root}/etc/udev/rules.d/70-cec-injector-mate-device.rules"
-cat >"${root}/etc/udev/rules.d/70-cec-injector-mate-platform.rules" <<EOF
-ACTION=="add|change", SUBSYSTEM=="misc", KERNEL=="uinput", RUN+="/usr/bin/setfacl -m u:$service_user:rw /dev/%k"
-ACTION=="add|change", SUBSYSTEM=="drm", KERNEL=="card[0-9]*", RUN+="/usr/bin/setfacl -m u:$service_user:r /dev/%k"
+rm -f -- "${root}/etc/udev/rules.d/70-cec-injector-mate-device.rules" \
+  "${root}/etc/udev/rules.d/70-cec-injector-mate-platform.rules"
+printf '%s\n' "$serial_rule" >"${root}/etc/udev/rules.d/80-cec-injector-mate-device.rules"
+cat >"${root}/etc/udev/rules.d/80-cec-injector-mate-platform.rules" <<EOF
+ACTION=="add|change", SUBSYSTEM=="misc", KERNEL=="uinput", GROUP="$service_user", MODE="0660", TAG-="uaccess"
 EOF
 printf '%s\n' "$wake_rule" >"${root}/etc/udev/rules.d/71-cec-injector-mate-wakeup.rules"
 printf '%s\n' "$polkit_rule" >"${root}/etc/polkit-1/rules.d/49-cec-injector-mate-suspend.rules"
-chmod 0644 "${root}/etc/udev/rules.d/70-cec-injector-mate-device.rules" \
-  "${root}/etc/udev/rules.d/70-cec-injector-mate-platform.rules" \
+chmod 0644 "${root}/etc/udev/rules.d/80-cec-injector-mate-device.rules" \
+  "${root}/etc/udev/rules.d/80-cec-injector-mate-platform.rules" \
   "${root}/etc/udev/rules.d/71-cec-injector-mate-wakeup.rules" \
   "${root}/etc/polkit-1/rules.d/49-cec-injector-mate-suspend.rules"
 
@@ -131,10 +138,24 @@ systemctl daemon-reload
 udevadm control --reload-rules
 udevadm trigger --subsystem-match=tty --action=change
 udevadm trigger --subsystem-match=misc --sysname-match=uinput --action=change
-udevadm trigger --subsystem-match=drm --sysname-match='card*' --action=change
 udevadm trigger --subsystem-match=usb --attr-match=idVendor="$vendor" \
   --attr-match=idProduct="$product" --attr-match=serial="$serial" --action=change
 udevadm settle
+
+# Fail before enabling or starting Mate unless the installed identity can open
+# every production device endpoint through the just-applied permission model.
+runuser -u "$service_user" -- sh -c 'exec 3<>"$1"' sh "$stable"
+runuser -u "$service_user" -- sh -c 'exec 3>"$1"' sh /dev/uinput
+drm_ready=false
+for card in /dev/dri/card*; do
+  test -c "$card" || continue
+  if runuser -u "$service_user" -G video -- sh -c 'exec 3<"$1"' sh "$card"; then
+    drm_ready=true
+    break
+  fi
+done
+$drm_ready || { echo "service identity cannot open a DRM primary node" >&2; exit 1; }
+
 systemctl enable cec-injector-mate.service cec-injector-mate-boot.service
 # Installation is passive. The boot oneshot is enabled for the next real boot,
 # but is deliberately not started by the installer.

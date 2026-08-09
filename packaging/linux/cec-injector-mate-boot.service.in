@@ -7,6 +7,7 @@ Before=cec-injector-mate.service
 Type=oneshot
 User=cec-injector-mate
 Group=cec-injector-mate
+SupplementaryGroups=video
 RuntimeDirectory=cec-injector-mate
 StateDirectory=cec-injector-mate
 UMask=0077
