@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <iostream>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <thread>
 
@@ -22,6 +23,7 @@ void Usage() {
       << "usage: cec-injector-mate --pa-cache PATH [options]\n"
       << "  --uinput PATH\n  --device-id ID\n"
       << "  --remote-profile steamos-parity\n"
+      << "  --boot-once [--startup-timeout SECONDS]\n"
       << "  --power-on-boot --power-on-resume --standby-on-suspend\n"
       << "  --standby-on-shutdown --suspend-on-tv-standby\n"
       << "  --wake-host-on-tv-source-request\n";
@@ -34,6 +36,8 @@ int main(int argc, char** argv) {
   using namespace cec_injector::mate::linux_platform;
   LinuxHostPlatformConfiguration host_configuration;
   MateServiceConfiguration service_configuration;
+  bool boot_once = false;
+  std::chrono::seconds startup_timeout{30};
   for (int index = 1; index < argc; ++index) {
     const std::string_view option(argv[index]);
     const auto value = [&]() -> const char* {
@@ -57,6 +61,22 @@ int main(int argc, char** argv) {
         return Usage(), 2;
       }
       host_configuration.input_profile = steamos_parity_remote_input_profile();
+    } else if (option == "--boot-once") {
+      boot_once = true;
+    } else if (option == "--startup-timeout") {
+      const auto* seconds = value();
+      if (!seconds) return Usage(), 2;
+      try {
+        std::size_t consumed = 0;
+        const auto parsed = std::stoul(seconds, &consumed);
+        if (consumed != std::string_view(seconds).size() || parsed == 0 ||
+            parsed > 300) {
+          return Usage(), 2;
+        }
+        startup_timeout = std::chrono::seconds(parsed);
+      } catch (...) {
+        return Usage(), 2;
+      }
     } else if (option == "--power-on-boot") {
       service_configuration.policy.power_on_boot = true;
     } else if (option == "--power-on-resume") {
@@ -90,6 +110,27 @@ int main(int argc, char** argv) {
                           std::cerr << "cec-injector-mate: " << message << '\n';
                         });
     if (service.start() != OperationResult::Success) return 1;
+    if (boot_once) {
+      const auto deadline = std::chrono::steady_clock::now() + startup_timeout;
+      using namespace std::chrono_literals;
+      while (std::chrono::steady_clock::now() < deadline) {
+        service.wait_idle();
+        if (service.has_active_session()) break;
+        std::this_thread::sleep_for(500ms);
+        service.refresh_discovery();
+      }
+      service.wait_idle();
+      if (!service.has_active_session()) {
+        std::cerr << "cec-injector-mate: boot trigger timed out waiting for "
+                     "DeviceSession\n";
+        service.shutdown();
+        return 1;
+      }
+      service.trigger_boot();
+      service.wait_idle();
+      service.shutdown();
+      return 0;
+    }
     std::signal(SIGINT, Stop);
     std::signal(SIGTERM, Stop);
     using namespace std::chrono_literals;

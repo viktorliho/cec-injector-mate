@@ -77,9 +77,9 @@ runtime state, ephemeral session state, and platform-internal state. It must
 not embed machine serials, test paths, host usernames, or development USB
 identity as product policy.
 
-Runtime, configuration, and state path selection belongs to future
-Service/platform composition. Logging belongs to Service diagnostics and
-platform integration. System-service integration belongs to packaging, while
+Runtime, configuration, and state path selection belongs to Service/platform
+composition. Logging belongs to Service diagnostics and platform integration.
+System-service integration belongs to packaging, while
 SteamOS persistence and repair belong specifically to `packaging/steamos`.
 
 Live/cache physical-address provenance, richer authorization diagnostics,
@@ -116,7 +116,7 @@ generic Linux mechanisms and SteamOS-specific persistence.
 - GUI toolkit, repositories, and implementation;
 - Windows and macOS implementations;
 - policy for multiple simultaneously active Devices;
-- installer and package format;
+- distribution-native package format;
 - configuration hot reload;
 - protocol code generation or a shared protocol package;
 - replacement of libCEC.

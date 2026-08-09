@@ -84,6 +84,11 @@ int main() {
   LinuxRemoteInputController input(std::move(sink));
   const auto start = LinuxRemoteInputController::Clock::time_point{};
 
+  CHECK(input.initialize() == OperationResult::Success);
+  CHECK(input.device_created());
+  CHECK(fake->create_count == 1);
+  CHECK(fake->events.empty());
+
   CHECK(input.emit_remote_action(Action::Up, State::Pressed, start) ==
         OperationResult::Success);
   CHECK(fake->create_count == 1);

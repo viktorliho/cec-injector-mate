@@ -84,6 +84,10 @@ OperationResult LinuxRemoteInputController::ensure_device() {
   return result;
 }
 
+OperationResult LinuxRemoteInputController::initialize() {
+  return ensure_device();
+}
+
 void LinuxRemoteInputController::fail_device() noexcept {
   sink_->destroy();
   device_created_ = false;

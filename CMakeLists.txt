@@ -32,6 +32,8 @@ if(CEC_INJECTOR_MATE_BUILD_LINUX AND CEC_INJECTOR_MATE_BUILD_LIBCEC)
             COMMAND cec-injector-mate --help)
         add_test(NAME mate-linux-cli-steamos-parity
             COMMAND cec-injector-mate --remote-profile steamos-parity --help)
+        add_test(NAME mate-linux-cli-boot-once
+            COMMAND cec-injector-mate --boot-once --startup-timeout 30 --help)
         add_test(NAME mate-linux-cli-removed-guide-ctrl-1
             COMMAND cec-injector-mate --guide-ctrl-1 --help)
         set_tests_properties(mate-linux-cli-removed-guide-ctrl-1

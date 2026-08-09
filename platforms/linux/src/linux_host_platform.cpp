@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 
@@ -119,7 +120,16 @@ LinuxHostPlatform::LinuxHostPlatform(LinuxHostPlatformConfiguration configuratio
       impl_->observer->on_host_lifecycle_notification(std::move(value));
     }
   });
-  (void)impl_->power->start();
+  if (impl_->power->start() != OperationResult::Success) {
+    throw std::runtime_error("Linux power/session runtime failed to start");
+  }
+  {
+    std::lock_guard lock(impl_->input_mutex);
+    if (impl_->remote_input.initialize() != OperationResult::Success) {
+      impl_->power->stop();
+      throw std::runtime_error("Linux remote-input backend failed to initialize");
+    }
+  }
   impl_->discovery.start();
   impl_->input_timer = std::thread([this] {
     using namespace std::chrono_literals;

@@ -197,6 +197,10 @@ struct MateService::Impl {
     ids.reserve(discovered.size());
     for (const auto& device : discovered) ids.push_back(device.id);
     log("discovery inventory refreshed");
+    if (diagnostics) {
+      diagnostics(std::string("discovery Device count ") +
+                  std::to_string(discovered.size()));
+    }
     const auto intents = registry.update_discovered(std::move(ids));
     for (const auto& intent : intents) {
       if (intent.kind == CoreIntentKind::DisconnectDevice) {
@@ -249,7 +253,15 @@ struct MateService::Impl {
     }
     DeviceSessionConfiguration configuration{*resolution.address};
     if (!configuration.valid()) return;
-    log("physical address available");
+    if (diagnostics) {
+      const auto address = configuration.physical_address;
+      const auto message = std::string("physical address available ") +
+          std::to_string((address >> 12) & 0xf) + "." +
+          std::to_string((address >> 8) & 0xf) + "." +
+          std::to_string((address >> 4) & 0xf) + "." +
+          std::to_string(address & 0xf);
+      diagnostics(message);
+    }
     auto created = factory.create_session(*discovered, configuration);
     if (!created || created->state() == SessionState::Connected) return;
     const auto next = generation.fetch_add(1) + 1;
@@ -415,10 +427,13 @@ struct MateService::Impl {
         if (authorization != AuthorizationState::Authorized) {
           return OperationResult::InvalidState;
         }
+        log("Remote Wake authorization Authorized");
         (void)session->query_wake_state();
         const auto configured = session->configure_wake(active_physical_address);
-        return configured == OperationResult::Success ? session->arm_wake()
-                                                      : configured;
+        if (configured != OperationResult::Success) return configured;
+        const auto armed = session->arm_wake();
+        if (armed == OperationResult::Success) log("Wake configured and armed");
+        return armed;
       }
       case PolicyIntent::DisarmWake:
         return session ? session->disarm_wake() : OperationResult::Disconnected;

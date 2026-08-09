@@ -1,0 +1,25 @@
+[Unit]
+Description=CEC Injector Mate explicit boot policy
+After=systemd-udevd.service dbus.service
+Before=cec-injector-mate.service
+
+[Service]
+Type=oneshot
+User=cec-injector-mate
+Group=cec-injector-mate
+RuntimeDirectory=cec-injector-mate
+StateDirectory=cec-injector-mate
+UMask=0077
+ExecStart=@EXECUTABLE@ --boot-once --startup-timeout 30 --device-id @DEVICE_ID@ --pa-cache /var/lib/cec-injector-mate/physical-address --uinput /dev/uinput --remote-profile steamos-parity --power-on-boot --power-on-resume --standby-on-suspend --standby-on-shutdown --suspend-on-tv-standby --wake-host-on-tv-source-request
+TimeoutStartSec=45s
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/cec-injector-mate
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

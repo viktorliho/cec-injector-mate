@@ -31,6 +31,10 @@ if(UNIX)
             ${PROJECT_SOURCE_DIR}/packaging/linux/tests/remote_wake_rule_test.sh
             ${PROJECT_SOURCE_DIR}/packaging/linux/generate-remote-wake-rule.sh
             ${PROJECT_SOURCE_DIR})
+    add_test(NAME mate-linux-production-installation
+        COMMAND sh
+            ${PROJECT_SOURCE_DIR}/packaging/linux/tests/production_installation_test.sh
+            ${PROJECT_SOURCE_DIR})
 endif()
 
 add_executable(mate-service-tests service_test.cpp)

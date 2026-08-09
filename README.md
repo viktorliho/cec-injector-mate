@@ -27,10 +27,10 @@ Device connection.
 ## Current status
 
 Experimental. The repository contains the portable Core and policy, the
-patched-libCEC DeviceSession adapter, Linux HostPlatform mechanisms, and a
-first foreground Service runtime composition. These APIs are not stable. The
-runtime is intended for controlled bring-up and does not yet provide packaging,
-system service integration, IPC, or a GUI.
+patched-libCEC DeviceSession adapter, Linux HostPlatform mechanisms, the
+hardware-validated foreground runtime, and a first production-style generic
+Linux installation candidate. These APIs are not stable. SteamOS OS-update
+persistence, IPC, and a GUI remain future work.
 
 See the [architecture contracts](docs/architecture.md),
 [contribution guidelines](CONTRIBUTING.md), and

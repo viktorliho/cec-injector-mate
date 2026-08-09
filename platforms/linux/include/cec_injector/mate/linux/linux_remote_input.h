@@ -86,6 +86,7 @@ class LinuxRemoteInputController {
   LinuxRemoteInputController(const LinuxRemoteInputController&) = delete;
   LinuxRemoteInputController& operator=(const LinuxRemoteInputController&) = delete;
 
+  OperationResult initialize();
   OperationResult emit_remote_action(SemanticRemoteAction action,
                                      RemoteActionState state,
                                      Clock::time_point now = Clock::now());
