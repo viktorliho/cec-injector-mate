@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "cec_injector/mate/linux/linux_device_discovery.h"
 
@@ -30,6 +31,18 @@ std::optional<std::uint16_t> ReadHex(const std::filesystem::path& path) {
     return std::nullopt;
   }
   return value;
+}
+
+bool UsbDeviceEvidence(const std::filesystem::path& path,
+                       const std::optional<std::string>& vendor,
+                       const std::optional<std::string>& product) {
+  std::ifstream uevent(path / "uevent");
+  std::string line;
+  while (std::getline(uevent, line)) {
+    if (line == "DEVTYPE=usb_device") return true;
+    if (line == "DEVTYPE=usb_interface") return false;
+  }
+  return vendor.has_value() || product.has_value();
 }
 
 }  // namespace
@@ -68,25 +81,32 @@ AuthorizationState LinuxRemoteWakeEnvironment::authorization(
     return AuthorizationState::Unavailable;
   }
 
-  std::vector<std::filesystem::path> usb_devices;
+  std::vector<std::filesystem::path> matches;
+  bool relevant_partial_identity = false;
   while (ancestor != sys_root) {
-    const auto vendor = ReadHex(ancestor / "idVendor");
-    const auto product = ReadHex(ancestor / "idProduct");
+    const auto vendor_text = ReadText(ancestor / "idVendor");
+    const auto product_text = ReadText(ancestor / "idProduct");
     const auto serial = ReadText(ancestor / "serial");
-    if (vendor || product || serial) {
-      if (!vendor || !product || !serial) return AuthorizationState::Unavailable;
-      usb_devices.push_back(ancestor);
+    if (UsbDeviceEvidence(ancestor, vendor_text, product_text)) {
+      const auto vendor = ReadHex(ancestor / "idVendor");
+      const auto product = ReadHex(ancestor / "idProduct");
+      const bool proven_non_match =
+          (vendor && *vendor != device->vendor_id) ||
+          (product && *product != device->product_id) ||
+          (serial && *serial != device->serial);
+      if (vendor && product && serial) {
+        if (!proven_non_match) matches.push_back(ancestor);
+      } else if (!proven_non_match) {
+        relevant_partial_identity = true;
+      }
     }
     ancestor = ancestor.parent_path();
   }
-  if (usb_devices.size() != 1) return AuthorizationState::Unavailable;
-
-  const auto& usb = usb_devices.front();
-  if (ReadHex(usb / "idVendor") != device->vendor_id ||
-      ReadHex(usb / "idProduct") != device->product_id ||
-      ReadText(usb / "serial") != device->serial) {
+  if (relevant_partial_identity || matches.size() != 1) {
     return AuthorizationState::Unavailable;
   }
+
+  const auto& usb = matches.front();
   const auto wakeup = ReadText(usb / "power" / "wakeup");
   if (!wakeup) return AuthorizationState::Unavailable;
   if (*wakeup == "enabled") return AuthorizationState::Authorized;

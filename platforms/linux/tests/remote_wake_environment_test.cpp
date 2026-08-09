@@ -36,7 +36,13 @@ class Fixture {
     Write(usb / "idVendor", "cafe");
     Write(usb / "idProduct", "cec1");
     Write(usb / "serial", serial);
+    Write(usb / "uevent", "DEVTYPE=usb_device");
     Write(usb / "power" / "wakeup", "enabled");
+    Write(RootHub() / "idVendor", "1d6b");
+    Write(RootHub() / "idProduct", "0002");
+    Write(RootHub() / "serial", "synthetic-root-hub");
+    Write(RootHub() / "uevent", "DEVTYPE=usb_device");
+    Write(RootHub() / "power" / "wakeup", "disabled");
   }
 
   ~Fixture() { std::filesystem::remove_all(root); }
@@ -64,6 +70,8 @@ class Fixture {
             .serial = serial};
   }
 
+  std::filesystem::path RootHub() const { return usb.parent_path(); }
+
   std::filesystem::path root;
   std::filesystem::path sys;
   std::filesystem::path usb;
@@ -79,6 +87,21 @@ int main() {
   LinuxRemoteWakeEnvironment resolver(fixture.sys);
   auto metadata = fixture.Metadata();
 
+  // The selected Injector is sufficient when no other USB-device identity is
+  // present in its ancestry.
+  std::filesystem::remove(fixture.RootHub() / "idVendor");
+  std::filesystem::remove(fixture.RootHub() / "idProduct");
+  std::filesystem::remove(fixture.RootHub() / "serial");
+  std::filesystem::remove(fixture.RootHub() / "uevent");
+  CHECK(resolver.authorization(metadata.id, {metadata}) ==
+        AuthorizationState::Authorized);
+  Write(fixture.RootHub() / "idVendor", "1d6b");
+  Write(fixture.RootHub() / "idProduct", "0002");
+  Write(fixture.RootHub() / "serial", "synthetic-root-hub");
+  Write(fixture.RootHub() / "uevent", "DEVTYPE=usb_device");
+
+  // A normal fully identified USB root hub is unrelated and its disabled wake
+  // state must not affect the selected Injector.
   CHECK(resolver.authorization(metadata.id, {metadata}) ==
         AuthorizationState::Authorized);
   Write(fixture.usb / "power" / "wakeup", "disabled");
@@ -86,6 +109,10 @@ int main() {
         AuthorizationState::Denied);
 
   std::filesystem::remove(fixture.usb / "power" / "wakeup");
+  CHECK(resolver.authorization(metadata.id, {metadata}) ==
+        AuthorizationState::Unavailable);
+  Write(fixture.usb / "power" / "wakeup", "enabled");
+  Write(fixture.usb / "power" / "wakeup", "unexpected");
   CHECK(resolver.authorization(metadata.id, {metadata}) ==
         AuthorizationState::Unavailable);
   Write(fixture.usb / "power" / "wakeup", "enabled");
@@ -124,11 +151,38 @@ int main() {
   Write(fixture.tty_device / "idVendor", "cafe");
   Write(fixture.tty_device / "idProduct", "cec1");
   Write(fixture.tty_device / "serial", fixture.serial);
+  Write(fixture.tty_device / "uevent", "DEVTYPE=usb_interface");
   CHECK(resolver.authorization(metadata.id, {metadata}) ==
-        AuthorizationState::Unavailable);
+        AuthorizationState::Authorized);
   std::filesystem::remove(fixture.tty_device / "idVendor");
   std::filesystem::remove(fixture.tty_device / "idProduct");
   std::filesystem::remove(fixture.tty_device / "serial");
+  std::filesystem::remove(fixture.tty_device / "uevent");
+
+  // A second complete matching USB-device ancestor is ambiguous.
+  Write(fixture.RootHub() / "idVendor", "cafe");
+  Write(fixture.RootHub() / "idProduct", "cec1");
+  Write(fixture.RootHub() / "serial", fixture.serial);
+  CHECK(resolver.authorization(metadata.id, {metadata}) ==
+        AuthorizationState::Unavailable);
+  Write(fixture.RootHub() / "idVendor", "1d6b");
+  Write(fixture.RootHub() / "idProduct", "0002");
+  Write(fixture.RootHub() / "serial", "synthetic-root-hub");
+
+  // Partial identity compatible with the selected Device is relevant and
+  // fails closed. Partial identity already proven unrelated is ignored.
+  std::filesystem::remove(fixture.usb / "serial");
+  CHECK(resolver.authorization(metadata.id, {metadata}) ==
+        AuthorizationState::Unavailable);
+  Write(fixture.usb / "serial", fixture.serial);
+  std::filesystem::remove(fixture.RootHub() / "serial");
+  CHECK(resolver.authorization(metadata.id, {metadata}) ==
+        AuthorizationState::Authorized);
+  Write(fixture.RootHub() / "serial", "synthetic-root-hub");
+  Write(fixture.usb / "idVendor", "not-hex");
+  CHECK(resolver.authorization(metadata.id, {metadata}) ==
+        AuthorizationState::Unavailable);
+  Write(fixture.usb / "idVendor", "cafe");
 
   const auto wake_before = [&] {
     std::ifstream input(fixture.usb / "power" / "wakeup");

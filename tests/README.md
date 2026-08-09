@@ -31,7 +31,8 @@ suppression, changed bindings, reset, timeout release, and failure recovery
 without opening `/dev/uinput`. They also verify the typed current SteamOS
 parity bindings for Guide and Info. Remote Wake tests build a synthetic sysfs and
 device-link tree to verify authorization, denial, missing/mismatched devices,
-ambiguous USB ancestry, tty renumbering, and read-only behavior.
+exact selected-ancestor matching through unrelated root hubs, partial identity,
+ambiguous matching ancestry, tty renumbering, and read-only behavior.
 
 Linux power/session tests use a narrow fake logind seam. They cover ordered
 sleep/shutdown lifecycle translation, transition-hold completion,

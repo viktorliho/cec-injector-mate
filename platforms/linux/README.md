@@ -49,7 +49,9 @@ the currently validated test-machine bindings for `Guide` (LeftShift+Tab) and
 
 Remote Wake support is runtime inspection only. Using the current discovery
 metadata, it resolves the stable locator to the current tty, validates the
-matching USB ancestor, and reads `power/wakeup` without writing sysfs.
+unique ancestor matching the selected Device's VID, PID, and serial, and reads
+that ancestor's `power/wakeup` without writing sysfs. Fully identified,
+non-matching ancestors such as a normal USB root hub do not create ambiguity.
 Privileged wake configuration and repair remain packaging responsibilities;
 machine-specific serial rules are not part of the runtime.
 
