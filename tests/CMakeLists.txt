@@ -25,6 +25,14 @@ add_test(NAME mate-core-boundary-scan
         -P ${CMAKE_CURRENT_SOURCE_DIR}/core_boundary_scan.cmake
 )
 
+if(UNIX)
+    add_test(NAME mate-linux-remote-wake-rule
+        COMMAND sh
+            ${PROJECT_SOURCE_DIR}/packaging/linux/tests/remote_wake_rule_test.sh
+            ${PROJECT_SOURCE_DIR}/packaging/linux/generate-remote-wake-rule.sh
+            ${PROJECT_SOURCE_DIR})
+endif()
+
 add_executable(mate-service-tests service_test.cpp)
 target_link_libraries(mate-service-tests PRIVATE CECInjector::MateService)
 target_include_directories(mate-service-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

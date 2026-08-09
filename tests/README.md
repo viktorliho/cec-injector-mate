@@ -33,6 +33,9 @@ parity bindings for Guide and Info. Remote Wake tests build a synthetic sysfs an
 device-link tree to verify authorization, denial, missing/mismatched devices,
 exact selected-ancestor matching through unrelated root hubs, partial identity,
 ambiguous matching ancestry, tty renumbering, and read-only behavior.
+Packaging tests verify deterministic exact-identity Remote Wake rule generation,
+USB-device-level matching, input validation, and the single deterministic
+install/removal path without touching the host's udev configuration.
 
 Linux power/session tests use a narrow fake logind seam. They cover ordered
 sleep/shutdown lifecycle translation, transition-hold completion,

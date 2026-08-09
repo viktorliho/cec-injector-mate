@@ -53,7 +53,9 @@ unique ancestor matching the selected Device's VID, PID, and serial, and reads
 that ancestor's `power/wakeup` without writing sysfs. Fully identified,
 non-matching ancestors such as a normal USB root hub do not create ambiguity.
 Privileged wake configuration and repair remain packaging responsibilities;
-machine-specific serial rules are not part of the runtime.
+machine-specific serial rules are not part of the runtime. Generic Linux
+packaging provides a generated exact-identity udev rule to restore authorization
+after USB add/change and physical reconnect.
 
 `LinuxHostPlatform` composes discovery, DRM/EDID PA resolution, uinput,
 Remote Wake inspection, and power/session mechanisms behind the portable
