@@ -44,9 +44,17 @@ LinuxSemanticMapping generic_linux_mapping(SemanticRemoteAction action) {
   return {Class::CurrentlyUnmapped, std::nullopt};
 }
 
+LinuxRemoteInputProfile steamos_parity_remote_input_profile() {
+  using Action = SemanticRemoteAction;
+  using Key = LinuxInputKey;
+  return {{{Action::Guide, {{Key::LeftShift, Key::Tab}}},
+           {Action::Info,
+            {{Key::LeftControl, Key::LeftShift, Key::Tab}}}}};
+}
+
 LinuxRemoteInputController::LinuxRemoteInputController(
-    std::unique_ptr<LinuxInputSink> sink, ProfileBindings profile_bindings)
-    : sink_(std::move(sink)), profile_bindings_(std::move(profile_bindings)) {
+    std::unique_ptr<LinuxInputSink> sink, LinuxRemoteInputProfile profile)
+    : sink_(std::move(sink)), profile_(std::move(profile)) {
   if (!sink_) throw std::invalid_argument("Linux input sink is required");
   for (int value = static_cast<int>(SemanticRemoteAction::Up);
        value <= static_cast<int>(SemanticRemoteAction::Previous); ++value) {
@@ -64,8 +72,8 @@ LinuxRemoteInputController::~LinuxRemoteInputController() {
 
 std::optional<LinuxInputBinding> LinuxRemoteInputController::binding_for(
     SemanticRemoteAction action) const {
-  const auto profile = profile_bindings_.find(action);
-  if (profile != profile_bindings_.end()) return profile->second;
+  const auto profile = profile_.bindings.find(action);
+  if (profile != profile_.bindings.end()) return profile->second;
   return generic_linux_mapping(action).binding;
 }
 

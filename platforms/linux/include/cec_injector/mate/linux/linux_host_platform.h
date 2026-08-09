@@ -38,7 +38,7 @@ struct LinuxHostPlatformConfiguration {
   std::filesystem::path physical_address_cache;
   std::filesystem::path sys_root{"/sys"};
   std::filesystem::path uinput_endpoint{"/dev/uinput"};
-  LinuxRemoteInputController::ProfileBindings input_profile;
+  LinuxRemoteInputProfile input_profile;
 };
 
 class LinuxHostPlatform final : public HostPlatform {

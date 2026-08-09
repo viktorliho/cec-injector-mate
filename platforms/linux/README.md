@@ -36,10 +36,11 @@ temporarily unavailable.
 Linux remote input maps generic semantic navigation and media actions to a
 private Linux key vocabulary. The uinput backend advertises only configured
 keys, emits a synchronization event after every key transition, tracks one
-active binding, and applies a 900 ms safety release. Chords are supported for
-later profiles; `Guide` is profile-required, while `Home` and `Menu` are
-currently unmapped. In particular, the private SteamOS `Guide` to Ctrl+1
-choice is not a generic mapping.
+active binding, and applies a 900 ms safety release. Chords are supported by
+typed construction-time profiles; `Guide` is profile-required, while `Home`
+and `Menu` are currently unmapped. The named `steamos-parity` profile records
+the currently validated test-machine bindings for `Guide` (LeftShift+Tab) and
+`Info` (LeftCtrl+LeftShift+Tab); it is not a universal SteamOS mapping.
 
 Remote Wake support is runtime inspection only. Using the current discovery
 metadata, it resolves the stable locator to the current tty, validates the
@@ -69,5 +70,5 @@ for input reset, Wake preparation, TV power, active-source, Device refresh,
 and Wake Reason operations. Service units, polkit installation, and other
 deployment configuration are not part of this platform slice.
 
-The optional construction-time input profile can supply the SteamOS parity
-binding `Guide` to Ctrl+1 without changing generic Linux mappings.
+The foreground runtime selects that profile narrowly with
+`--remote-profile steamos-parity`; arbitrary key-name parsing is not exposed.

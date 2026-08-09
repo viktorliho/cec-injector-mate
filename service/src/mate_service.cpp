@@ -33,6 +33,10 @@ std::optional<SemanticRemoteAction> RemoteAction(std::uint8_t code) {
     case 0x4c: return SemanticRemoteAction::Previous;
     case 0x53: return SemanticRemoteAction::Guide;
     case 0x61: return SemanticRemoteAction::PlayPause;
+    case 0x71: return SemanticRemoteAction::Next;
+    case 0x72: return SemanticRemoteAction::Previous;
+    case 0x73: return SemanticRemoteAction::Pause;
+    case 0x74: return SemanticRemoteAction::Play;
     default: return std::nullopt;
   }
 }

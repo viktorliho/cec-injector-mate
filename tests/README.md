@@ -26,7 +26,8 @@ fallback. No private display capture or machine-specific PA is included.
 Linux remote-input tests use an in-memory sink to verify generic/profile
 mapping boundaries, key/chord ordering, key-plus-sync emission, duplicate
 suppression, changed bindings, reset, timeout release, and failure recovery
-without opening `/dev/uinput`. Remote Wake tests build a synthetic sysfs and
+without opening `/dev/uinput`. They also verify the typed current SteamOS
+parity bindings for Guide and Info. Remote Wake tests build a synthetic sysfs and
 device-link tree to verify authorization, denial, missing/mismatched devices,
 ambiguous USB ancestry, tty renumbering, and read-only behavior.
 
@@ -40,7 +41,8 @@ compiled only by the opt-in Linux build; tests do not contact the system bus.
 Service tests use fake HostPlatform and DeviceSession implementations to cover
 selection, PA-gated construction, PA replacement, generation cancellation,
 passive startup, validated CEC User Control and TV Standby translation, Wake
-maintenance, lifecycle holds, policy dependencies, and clean shutdown. The
+maintenance, lifecycle holds, policy dependencies, and clean shutdown,
+including the proven 0x71--0x74 semantic overrides. The
 full Linux+libCEC build also tests current-inventory locator validation without
 opening hardware. Hardware validation remains distinct from native CTest
 results.

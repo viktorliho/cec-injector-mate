@@ -28,7 +28,8 @@ std::uint16_t LinuxCode(LinuxInputKey key) {
     case LinuxInputKey::NextSong: return KEY_NEXTSONG;
     case LinuxInputKey::PreviousSong: return KEY_PREVIOUSSONG;
     case LinuxInputKey::LeftControl: return KEY_LEFTCTRL;
-    case LinuxInputKey::Digit1: return KEY_1;
+    case LinuxInputKey::LeftShift: return KEY_LEFTSHIFT;
+    case LinuxInputKey::Tab: return KEY_TAB;
   }
   return KEY_RESERVED;
 }

@@ -298,6 +298,16 @@ void TestInputStandbyAndLifecycle() {
   service.wait_idle();
   REQUIRE(host.input.back() ==
         std::pair(SemanticRemoteAction::Up, RemoteActionState::Released));
+  for (const auto [operand, action] :
+       {std::pair{std::uint8_t{0x71}, SemanticRemoteAction::Next},
+        std::pair{std::uint8_t{0x72}, SemanticRemoteAction::Previous},
+        std::pair{std::uint8_t{0x73}, SemanticRemoteAction::Pause},
+        std::pair{std::uint8_t{0x74}, SemanticRemoteAction::Play}}) {
+    record->frame({0x04, 0x44, operand});
+    service.wait_idle();
+    REQUIRE(host.input.back() ==
+            std::pair(action, RemoteActionState::Pressed));
+  }
   const auto input_count = host.input.size();
   record->frame({0x14, 0x44, 0x01});
   record->frame({0x05, 0x44, 0x01});

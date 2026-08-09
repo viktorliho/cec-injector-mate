@@ -72,6 +72,8 @@ int main() {
   CHECK(generic_linux_mapping(Action::Guide).classification ==
         Class::ProfileRequired);
   CHECK(!generic_linux_mapping(Action::Guide).binding);
+  CHECK(generic_linux_mapping(Action::Info).binding ==
+        LinuxInputBinding{{KeyCode::Info}});
   CHECK(generic_linux_mapping(Action::Home).classification ==
         Class::CurrentlyUnmapped);
   CHECK(generic_linux_mapping(Action::Menu).classification ==
@@ -120,18 +122,63 @@ int main() {
         OperationResult::Success);
   CHECK(!input.active_action());
 
+  const auto parity_profile = steamos_parity_remote_input_profile();
+  CHECK(parity_profile.bindings.at(Action::Guide) ==
+        LinuxInputBinding{{KeyCode::LeftShift, KeyCode::Tab}});
+  CHECK(parity_profile.bindings.at(Action::Info) ==
+        LinuxInputBinding{
+            {KeyCode::LeftControl, KeyCode::LeftShift, KeyCode::Tab}});
+
   auto chord_sink = std::make_unique<FakeSink>();
   auto* chord_fake = chord_sink.get();
-  LinuxRemoteInputController chord(
-      std::move(chord_sink),
-      {{Action::Guide, {{KeyCode::LeftControl, KeyCode::Digit1}}}});
+  LinuxRemoteInputController chord(std::move(chord_sink), parity_profile);
   CHECK(chord.emit_remote_action(Action::Guide, State::Pressed, start) ==
         OperationResult::Success);
   CHECK(chord.reset_remote_input() == OperationResult::Success);
   CHECK(chord_fake->events == std::vector<LinuxInputEvent>(
+                                   {Key(KeyCode::LeftShift, true), Sync(),
+                                    Key(KeyCode::Tab, true), Sync(),
+                                    Key(KeyCode::Tab, false), Sync(),
+                                    Key(KeyCode::LeftShift, false), Sync()}));
+
+  chord_fake->events.clear();
+  CHECK(chord.emit_remote_action(Action::Guide, State::Pressed, start) ==
+        OperationResult::Success);
+  CHECK(chord.emit_remote_action(Action::Info, State::Pressed,
+                                 start + std::chrono::milliseconds(1)) ==
+        OperationResult::Success);
+  CHECK(chord_fake->events == std::vector<LinuxInputEvent>(
+                                   {Key(KeyCode::LeftShift, true), Sync(),
+                                    Key(KeyCode::Tab, true), Sync(),
+                                    Key(KeyCode::Tab, false), Sync(),
+                                    Key(KeyCode::LeftShift, false), Sync(),
+                                    Key(KeyCode::LeftControl, true), Sync(),
+                                    Key(KeyCode::LeftShift, true), Sync(),
+                                    Key(KeyCode::Tab, true), Sync()}));
+  CHECK(chord.reset_remote_input() == OperationResult::Success);
+  CHECK(chord_fake->events == std::vector<LinuxInputEvent>(
+                                   {Key(KeyCode::LeftShift, true), Sync(),
+                                    Key(KeyCode::Tab, true), Sync(),
+                                    Key(KeyCode::Tab, false), Sync(),
+                                    Key(KeyCode::LeftShift, false), Sync(),
+                                    Key(KeyCode::LeftControl, true), Sync(),
+                                    Key(KeyCode::LeftShift, true), Sync(),
+                                    Key(KeyCode::Tab, true), Sync(),
+                                    Key(KeyCode::Tab, false), Sync(),
+                                    Key(KeyCode::LeftShift, false), Sync(),
+                                    Key(KeyCode::LeftControl, false), Sync()}));
+
+  chord_fake->events.clear();
+  CHECK(chord.emit_remote_action(Action::Info, State::Pressed, start) ==
+        OperationResult::Success);
+  CHECK(chord.tick(start + LinuxRemoteInputController::kSafetyReleaseTimeout) ==
+        OperationResult::Success);
+  CHECK(chord_fake->events == std::vector<LinuxInputEvent>(
                                    {Key(KeyCode::LeftControl, true), Sync(),
-                                    Key(KeyCode::Digit1, true), Sync(),
-                                    Key(KeyCode::Digit1, false), Sync(),
+                                    Key(KeyCode::LeftShift, true), Sync(),
+                                    Key(KeyCode::Tab, true), Sync(),
+                                    Key(KeyCode::Tab, false), Sync(),
+                                    Key(KeyCode::LeftShift, false), Sync(),
                                     Key(KeyCode::LeftControl, false), Sync()}));
 
   auto failure_sink = std::make_unique<FakeSink>();

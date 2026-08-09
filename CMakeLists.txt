@@ -27,6 +27,16 @@ if(CEC_INJECTOR_MATE_BUILD_LINUX AND CEC_INJECTOR_MATE_BUILD_LIBCEC)
     target_compile_features(cec-injector-mate PRIVATE cxx_std_20)
     target_compile_options(cec-injector-mate PRIVATE
         -Wall -Wextra -Wpedantic)
+    if(BUILD_TESTING)
+        add_test(NAME mate-linux-cli-generic
+            COMMAND cec-injector-mate --help)
+        add_test(NAME mate-linux-cli-steamos-parity
+            COMMAND cec-injector-mate --remote-profile steamos-parity --help)
+        add_test(NAME mate-linux-cli-removed-guide-ctrl-1
+            COMMAND cec-injector-mate --guide-ctrl-1 --help)
+        set_tests_properties(mate-linux-cli-removed-guide-ctrl-1
+            PROPERTIES WILL_FAIL TRUE)
+    endif()
 endif()
 
 if(BUILD_TESTING)

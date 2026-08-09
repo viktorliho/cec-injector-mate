@@ -20,7 +20,8 @@ extern "C" void Stop(int) { stopping = true; }
 void Usage() {
   std::cerr
       << "usage: cec-injector-mate --pa-cache PATH [options]\n"
-      << "  --uinput PATH\n  --device-id ID\n  --guide-ctrl-1\n"
+      << "  --uinput PATH\n  --device-id ID\n"
+      << "  --remote-profile steamos-parity\n"
       << "  --power-on-boot --power-on-resume --standby-on-suspend\n"
       << "  --standby-on-shutdown --suspend-on-tv-standby\n"
       << "  --wake-host-on-tv-source-request\n";
@@ -50,9 +51,12 @@ int main(int argc, char** argv) {
       const auto* id = value();
       if (!id) return Usage(), 2;
       service_configuration.selected_device = DeviceId(id);
-    } else if (option == "--guide-ctrl-1") {
-      host_configuration.input_profile[SemanticRemoteAction::Guide] =
-          {{LinuxInputKey::LeftControl, LinuxInputKey::Digit1}};
+    } else if (option == "--remote-profile") {
+      const auto* profile = value();
+      if (!profile || std::string_view(profile) != "steamos-parity") {
+        return Usage(), 2;
+      }
+      host_configuration.input_profile = steamos_parity_remote_input_profile();
     } else if (option == "--power-on-boot") {
       service_configuration.policy.power_on_boot = true;
     } else if (option == "--power-on-resume") {

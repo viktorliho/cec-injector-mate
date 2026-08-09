@@ -27,13 +27,20 @@ enum class LinuxInputKey {
   NextSong,
   PreviousSong,
   LeftControl,
-  Digit1,
+  LeftShift,
+  Tab,
 };
 
 struct LinuxInputBinding {
   std::vector<LinuxInputKey> keys;
   bool operator==(const LinuxInputBinding&) const = default;
 };
+
+struct LinuxRemoteInputProfile {
+  std::map<SemanticRemoteAction, LinuxInputBinding> bindings;
+};
+
+[[nodiscard]] LinuxRemoteInputProfile steamos_parity_remote_input_profile();
 
 enum class LinuxInputEventKind { Key, Synchronize };
 
@@ -69,12 +76,11 @@ class LinuxInputSink {
 class LinuxRemoteInputController {
  public:
   using Clock = std::chrono::steady_clock;
-  using ProfileBindings = std::map<SemanticRemoteAction, LinuxInputBinding>;
   static constexpr std::chrono::milliseconds kSafetyReleaseTimeout{900};
 
   explicit LinuxRemoteInputController(
       std::unique_ptr<LinuxInputSink> sink,
-      ProfileBindings profile_bindings = {});
+      LinuxRemoteInputProfile profile = {});
   ~LinuxRemoteInputController();
 
   LinuxRemoteInputController(const LinuxRemoteInputController&) = delete;
@@ -106,7 +112,7 @@ class LinuxRemoteInputController {
   void fail_device() noexcept;
 
   std::unique_ptr<LinuxInputSink> sink_;
-  ProfileBindings profile_bindings_;
+  LinuxRemoteInputProfile profile_;
   std::set<LinuxInputKey> capabilities_;
   bool device_created_{};
   std::optional<SemanticRemoteAction> active_action_;
