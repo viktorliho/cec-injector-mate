@@ -21,7 +21,7 @@ The serial is deployment input and is not stored in public source.
 
 `install.sh BUNDLE VID PID SERIAL` installs a pinned public bundle and a
 dedicated unprivileged `cec-injector-mate` account/group. Exact-device serial
-access and `/dev/uinput` use native udev group ownership with mode `0660`;
+access and `/dev/uinput` use native udev ownership with mode `0600`;
 read-only DRM EDID queries use the ordinary primary-node `video` group without
 granting render-node access. The installer also provides the exact-device Wake
 rule, narrow suspend authorization, and two systemd units. Program files live
@@ -30,11 +30,11 @@ below `/opt/cec-injector-mate/releases`; configuration is in
 `/var/lib/cec-injector-mate`; `/run/cec-injector-mate` is ephemeral.
 
 The project rules run after the normal seat rules and remove the `uaccess` tag
-for their selected devices. This guarantees the final group and mode but does
-not erase an ACL that an earlier seat builtin already applied during the same
-event. Such a pre-existing desktop-user ACL is a separate SteamOS seat-policy
-concern; target acceptance checks effective ACLs explicitly, while installation
-never uses an external udev helper to rewrite them.
+for their selected devices. Service access relies on the owner `user::rw-` ACL
+entry, not the owning-group entry that SteamOS seat handling can rewrite. Tag
+removal does not erase a named ACL that an earlier seat builtin already applied
+during the same event. Such a pre-existing desktop-user ACL is informational;
+installation never uses an external udev helper to rewrite it.
 
 The long-running service always starts passively. A distinct boot oneshot owns
 the DeviceSession first, waits for it, submits the existing typed

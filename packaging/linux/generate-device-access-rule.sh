@@ -16,4 +16,4 @@ esac
 
 vendor=$(printf '%s' "$vendor" | tr 'A-F' 'a-f')
 product=$(printf '%s' "$product" | tr 'A-F' 'a-f')
-printf '%s\n' "ACTION==\"add|change\", SUBSYSTEM==\"tty\", ATTRS{idVendor}==\"$vendor\", ATTRS{idProduct}==\"$product\", ATTRS{serial}==\"$serial\", GROUP=\"$service_user\", MODE=\"0660\", TAG-=\"uaccess\""
+printf '%s\n' "ACTION==\"add|change\", SUBSYSTEM==\"tty\", ATTRS{idVendor}==\"$vendor\", ATTRS{idProduct}==\"$product\", ATTRS{serial}==\"$serial\", OWNER=\"$service_user\", GROUP=\"$service_user\", MODE=\"0600\", TAG-=\"uaccess\""

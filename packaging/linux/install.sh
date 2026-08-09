@@ -53,12 +53,14 @@ if test -z "$root"; then
   test "$(sha256sum "$bundle/lib/libcec.so.7" | cut -d' ' -f1)" = "$expected_cec"
   test "$(sha256sum "$bundle/lib/libp8-platform.so.2" | cut -d' ' -f1)" = "$expected_p8"
   matches=0
+  selected_usb=
   for device in /sys/bus/usb/devices/*; do
     test -f "$device/idVendor" && test -f "$device/idProduct" && test -f "$device/serial" || continue
     test "$(cat "$device/idVendor")" = "$vendor" || continue
     test "$(cat "$device/idProduct")" = "$product" || continue
     test "$(cat "$device/serial")" = "$serial" || continue
     matches=$((matches + 1))
+    selected_usb=$device
   done
   test "$matches" -eq 1 || { echo "selected USB identity is absent or ambiguous" >&2; exit 1; }
   stable=$(find /dev/serial/by-id -maxdepth 1 -type l -name "*${serial}*" -print 2>/dev/null | head -n 2)
@@ -111,7 +113,7 @@ rm -f -- "${root}/etc/udev/rules.d/70-cec-injector-mate-device.rules" \
   "${root}/etc/udev/rules.d/70-cec-injector-mate-platform.rules"
 printf '%s\n' "$serial_rule" >"${root}/etc/udev/rules.d/80-cec-injector-mate-device.rules"
 cat >"${root}/etc/udev/rules.d/80-cec-injector-mate-platform.rules" <<EOF
-ACTION=="add|change", SUBSYSTEM=="misc", KERNEL=="uinput", GROUP="$service_user", MODE="0660", TAG-="uaccess"
+ACTION=="add|change", SUBSYSTEM=="misc", KERNEL=="uinput", OWNER="$service_user", GROUP="$service_user", MODE="0600", TAG-="uaccess"
 EOF
 printf '%s\n' "$wake_rule" >"${root}/etc/udev/rules.d/71-cec-injector-mate-wakeup.rules"
 printf '%s\n' "$polkit_rule" >"${root}/etc/polkit-1/rules.d/49-cec-injector-mate-suspend.rules"
@@ -146,6 +148,9 @@ udevadm settle
 # every production device endpoint through the just-applied permission model.
 runuser -u "$service_user" -- sh -c 'exec 3<>"$1"' sh "$stable"
 runuser -u "$service_user" -- sh -c 'exec 3>"$1"' sh /dev/uinput
+test "$(cat "$selected_usb/power/wakeup")" = enabled || {
+  echo "selected Device Remote Wake is not authorized" >&2; exit 1;
+}
 drm_ready=false
 for card in /dev/dri/card*; do
   test -c "$card" || continue

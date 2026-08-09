@@ -36,25 +36,36 @@ health=$root/opt/cec-injector-mate/current/libexec/health-check
 test "$(basename "$device_rule")" = 80-cec-injector-mate-device.rules
 test "$(basename "$platform_rule")" = 80-cec-injector-mate-platform.rules
 grep -Fq "ATTRS{serial}==\"$serial\"" "$device_rule"
-grep -Fq 'GROUP="cec-injector-mate", MODE="0660"' "$device_rule"
+grep -Fq 'OWNER="cec-injector-mate", GROUP="cec-injector-mate", MODE="0600"' "$device_rule"
 grep -Fq 'TAG-="uaccess"' "$device_rule"
 ! grep -Fq 'RUN+=' "$device_rule"
 ! grep -Fq setfacl "$device_rule"
 ! grep -Fq ttyACM "$device_rule"
 grep -Fq "ATTR{serial}==\"$serial\"" "$wake_rule"
 grep -Fq 'KERNEL=="uinput"' "$platform_rule"
-grep -Fq 'GROUP="cec-injector-mate", MODE="0660"' "$platform_rule"
+grep -Fq 'OWNER="cec-injector-mate", GROUP="cec-injector-mate", MODE="0600"' "$platform_rule"
 grep -Fq 'TAG-="uaccess"' "$platform_rule"
 ! grep -Fq 'RUN+=' "$platform_rule"
 ! grep -Fq setfacl "$platform_rule"
 ! grep -Fq 'SUBSYSTEM=="drm"' "$platform_rule"
 ! grep -Fq 'renderD' "$platform_rule"
 ! grep -Fq 'MODE="0666"' "$platform_rule"
+! grep -Fq 'MODE="0660"' "$platform_rule"
 test ! -e "$root/etc/udev/rules.d/70-cec-injector-mate-device.rules"
 test ! -e "$root/etc/udev/rules.d/70-cec-injector-mate-platform.rules"
 grep -Fq "runuser -u \"\$service_user\" -- sh -c 'exec 3<>\"\$1\"'" "$packaging/install.sh"
 grep -Fq "runuser -u \"\$service_user\" -- sh -c 'exec 3>\"\$1\"'" "$packaging/install.sh"
 grep -Fq "runuser -u \"\$service_user\" -G video -- sh -c 'exec 3<\"\$1\"'" "$packaging/install.sh"
+grep -Fq 'selected Device Remote Wake is not authorized' "$packaging/install.sh"
+
+account_line=$(grep -n 'useradd --system' "$packaging/install.sh" | cut -d: -f1)
+rules_line=$(grep -n '80-cec-injector-mate-device.rules"' "$packaging/install.sh" | head -n1 | cut -d: -f1)
+test "$account_line" -lt "$rules_line"
+remove_line=$(grep -n '80-cec-injector-mate-device.rules"' "$packaging/uninstall.sh" | head -n1 | cut -d: -f1)
+trigger_line=$(grep -n 'udevadm trigger --subsystem-match=tty' "$packaging/uninstall.sh" | cut -d: -f1)
+delete_line=$(grep -n 'userdel cec-injector-mate' "$packaging/uninstall.sh" | cut -d: -f1)
+test "$remove_line" -lt "$trigger_line"
+test "$trigger_line" -lt "$delete_line"
 
 test "$(grep -Fc 'org.freedesktop.login1.suspend"' "$polkit")" -eq 1
 test "$(grep -Fc 'org.freedesktop.login1.suspend-multiple-sessions"' "$polkit")" -eq 1

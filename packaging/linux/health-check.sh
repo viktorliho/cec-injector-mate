@@ -26,7 +26,12 @@ done
 
 device=$(find /dev/serial/by-id -maxdepth 1 -type l -name "*${CEC_MATE_SERIAL}*" -print 2>/dev/null | head -n 2)
 test "$(printf '%s\n' "$device" | sed '/^$/d' | wc -l)" -eq 1 && echo "PASS selected Device visible" || { echo "FAIL selected Device visible"; fail=1; }
+service_uid=$(id -u cec-injector-mate)
+test -n "$device" && test "$(stat -Lc %u "$device")" -eq "$service_uid" && echo "PASS serial owner" || { echo "FAIL serial owner"; fail=1; }
+test -n "$device" && test "$((0$(stat -Lc %a "$device") & 7))" -eq 0 && echo "PASS serial no world access" || { echo "FAIL serial world access"; fail=1; }
 runuser -u cec-injector-mate -- test -r "$device" && runuser -u cec-injector-mate -- test -w "$device" && echo "PASS serial access" || { echo "FAIL serial access"; fail=1; }
+test "$(stat -Lc %u /dev/uinput)" -eq "$service_uid" && echo "PASS uinput owner" || { echo "FAIL uinput owner"; fail=1; }
+test "$((0$(stat -Lc %a /dev/uinput) & 7))" -eq 0 && echo "PASS uinput no world access" || { echo "FAIL uinput world access"; fail=1; }
 runuser -u cec-injector-mate -- test -r /dev/uinput && runuser -u cec-injector-mate -- test -w /dev/uinput && echo "PASS uinput access" || { echo "FAIL uinput access"; fail=1; }
 drm_access=false
 for card in /dev/dri/card*; do
