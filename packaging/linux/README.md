@@ -32,7 +32,7 @@ the DeviceSession first, waits for it, submits the existing typed
 to start. The installer starts only the passive service; the oneshot first runs
 on the next ordinary boot.
 
-`/usr/libexec/cec-injector-mate/health-check` correlates diagnostics with the
+`/opt/cec-injector-mate/current/libexec/health-check` correlates diagnostics with the
 current systemd invocation and checks the selected serial, PA, session, Wake,
 input permission, and lifecycle inhibitors. `uninstall.sh` removes only public
 integration and program files and preserves `/etc/cec-injector-mate` and

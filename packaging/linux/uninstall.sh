@@ -29,9 +29,8 @@ rm -f -- \
   "${root}/etc/udev/rules.d/70-cec-injector-mate-device.rules" \
   "${root}/etc/udev/rules.d/70-cec-injector-mate-platform.rules" \
   "${root}/etc/udev/rules.d/71-cec-injector-mate-wakeup.rules" \
-  "${root}/etc/polkit-1/rules.d/49-cec-injector-mate-suspend.rules" \
-  "${root}/usr/libexec/cec-injector-mate/health-check"
-rm -rf -- "${root}/opt/cec-injector-mate" "${root}/usr/libexec/cec-injector-mate"
+  "${root}/etc/polkit-1/rules.d/49-cec-injector-mate-suspend.rules"
+rm -rf -- "${root}/opt/cec-injector-mate"
 if $purge_state; then rm -rf -- "${root}/var/lib/cec-injector-mate"; fi
 
 if test -n "$root"; then

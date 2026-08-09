@@ -26,6 +26,7 @@ platform_rule=$root/etc/udev/rules.d/70-cec-injector-mate-platform.rules
 polkit=$root/etc/polkit-1/rules.d/49-cec-injector-mate-suspend.rules
 service=$root/etc/systemd/system/cec-injector-mate.service
 boot=$root/etc/systemd/system/cec-injector-mate-boot.service
+health=$root/opt/cec-injector-mate/current/libexec/health-check
 
 grep -Fq "ATTRS{serial}==\"$serial\"" "$device_rule"
 grep -Fq 'RUN+="/usr/bin/setfacl -m u:cec-injector-mate:rw /dev/%k"' "$device_rule"
@@ -49,6 +50,8 @@ grep -Fq 'After=cec-injector-mate-boot.service' "$service"
 ! grep -Fq -- '--boot-once' "$service"
 grep -Fq -- '--boot-once --startup-timeout 30' "$boot"
 grep -Fq 'Before=cec-injector-mate.service' "$boot"
+test -x "$health"
+! find "$root" -path '*/usr/libexec/*' -print | grep -q .
 
 # Reinstalling for a new serial replaces, rather than accumulates, rules.
 CEC_MATE_ROOT=$root "$packaging/install.sh" "$bundle" cafe cec1 TEST-SECOND-SERIAL

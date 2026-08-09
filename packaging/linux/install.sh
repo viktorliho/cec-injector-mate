@@ -76,9 +76,12 @@ stage="${root}${release}.new"
 rm -rf -- "$stage"
 install -d -m 0755 "$stage"
 cp -a -- "$bundle/." "$stage/"
+install -d -m 0755 "$stage/libexec"
+install -m 0755 "$source_dir/health-check.sh" "$stage/libexec/health-check"
 find "$stage" -type d -exec chmod 0755 {} +
 find "$stage" -type f -exec chmod go-w {} +
 chmod 0755 "$stage/bin/cec-injector-mate"
+if test -z "$root"; then chown -R root:root "$stage"; fi
 rm -rf -- "${root}${release}"
 mv -- "$stage" "${root}${release}"
 install -d -m 0755 "${root}/opt/cec-injector-mate"
@@ -97,7 +100,7 @@ EOF
 install -m 0644 "$config_tmp" "${root}/etc/cec-injector-mate/installation.conf"
 
 install -d -m 0755 "${root}/etc/udev/rules.d" "${root}/etc/polkit-1/rules.d" \
-  "${root}/etc/systemd/system" "${root}/usr/libexec/cec-injector-mate"
+  "${root}/etc/systemd/system"
 printf '%s\n' "$serial_rule" >"${root}/etc/udev/rules.d/70-cec-injector-mate-device.rules"
 cat >"${root}/etc/udev/rules.d/70-cec-injector-mate-platform.rules" <<EOF
 ACTION=="add|change", SUBSYSTEM=="misc", KERNEL=="uinput", RUN+="/usr/bin/setfacl -m u:$service_user:rw /dev/%k"
@@ -117,9 +120,6 @@ sed -e "s|@EXECUTABLE@|$executable|g" -e "s|@DEVICE_ID@|$device_id|g" "$source_d
   >"${root}/etc/systemd/system/cec-injector-mate-boot.service"
 chmod 0644 "${root}/etc/systemd/system/cec-injector-mate.service" \
   "${root}/etc/systemd/system/cec-injector-mate-boot.service"
-install -m 0755 "$source_dir/health-check.sh" \
-  "${root}/usr/libexec/cec-injector-mate/health-check"
-
 if test -n "$root"; then
   install -d -m 0700 "${root}/var/lib/cec-injector-mate"
   echo "staged installation under $root"
@@ -140,9 +140,9 @@ systemctl enable cec-injector-mate.service cec-injector-mate-boot.service
 # but is deliberately not started by the installer.
 systemctl restart cec-injector-mate.service
 attempt=0
-until /usr/libexec/cec-injector-mate/health-check >/dev/null 2>&1; do
+until /opt/cec-injector-mate/current/libexec/health-check >/dev/null 2>&1; do
   attempt=$((attempt + 1))
   test "$attempt" -lt 30 || break
   sleep 1
 done
-/usr/libexec/cec-injector-mate/health-check
+/opt/cec-injector-mate/current/libexec/health-check
