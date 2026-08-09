@@ -79,7 +79,8 @@ struct LinuxHostPlatform::Impl {
       : inventory(std::move(inventory)),
         discovery([this](LinuxDiscoverySnapshot) { refresh_inventory(); }),
         physical_address(std::move(configuration.drm_root),
-                         std::move(configuration.physical_address_cache)),
+                         std::move(configuration.physical_address_cache),
+                         create_libdrm_edid_reader()),
         power(create_linux_power_session_runtime()),
         remote_input(create_linux_uinput_sink(
                          std::move(configuration.uinput_endpoint)),

@@ -3,6 +3,7 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -229,6 +230,16 @@ int main() {
 
   LinuxPhysicalAddressResolver resolver(drm, cache_path);
   CHECK(resolver.resolve().status == PhysicalAddressStatus::Unavailable);
+
+  // Real /sys/class/drm contains card/render nodes and a version file in
+  // addition to connector symlinks. Non-connectors must not poison the
+  // complete connector snapshot.
+  std::filesystem::create_directories(drm / "card0");
+  std::filesystem::create_directories(drm / "card1");
+  std::filesystem::create_directories(drm / "renderD128");
+  std::filesystem::create_directories(drm / "renderD129");
+  { std::ofstream(drm / "version") << "drm 1.1.0\n"; }
+  CHECK(resolver.resolve().status == PhysicalAddressStatus::Unavailable);
   CHECK(WriteConnector(drm, "card0-HDMI-A-1", true, pa1000));
   CHECK(resolver.resolve() ==
         PhysicalAddressResolution{PhysicalAddressStatus::Available, 0x1000});
@@ -244,6 +255,67 @@ int main() {
   CHECK(resolver.resolve().status == PhysicalAddressStatus::Ambiguous);
   { std::ofstream(drm / "card1-HDMI-A-2" / "status") << "disconnected\n"; }
   CHECK(resolver.resolve().status == PhysicalAddressStatus::Unavailable);
+
+  const auto source_root = root / "drm-source";
+  const auto source_cache = root / "state" / "source-physical-address";
+  std::filesystem::create_directories(source_root);
+  std::map<std::string, std::optional<std::vector<std::uint8_t>>> drm_edids;
+  std::vector<std::string> drm_requests;
+  DrmEdidReader fake_drm = [&](const std::filesystem::path& connector) {
+    const auto name = connector.filename().string();
+    drm_requests.push_back(name);
+    const auto found = drm_edids.find(name);
+    return found == drm_edids.end() ? std::nullopt : found->second;
+  };
+  LinuxPhysicalAddressResolver source_resolver(source_root, source_cache,
+                                                fake_drm);
+
+  // SteamOS shape: empty sysfs EDID and valid KMS property.
+  CHECK(WriteConnector(source_root, "card0-HDMI-A-2", true,
+                       std::vector<std::uint8_t>{}));
+  drm_edids["card0-HDMI-A-2"] = pa1000;
+  CHECK(source_resolver.resolve() ==
+        PhysicalAddressResolution{PhysicalAddressStatus::Available, 0x1000});
+  CHECK(drm_requests == std::vector<std::string>{"card0-HDMI-A-2"});
+  CHECK(load_physical_address_cache(source_cache));
+
+  // Missing and structurally invalid sysfs EDIDs may use valid KMS evidence.
+  std::filesystem::remove(source_root / "card0-HDMI-A-2" / "edid");
+  CHECK(source_resolver.resolve().address == 0x1000);
+  CHECK(WriteBinary(source_root / "card0-HDMI-A-2" / "edid",
+                    std::vector<std::uint8_t>{1, 2, 3}));
+  CHECK(source_resolver.resolve().address == 0x1000);
+
+  // Matching valid sources are accepted; conflicting valid source evidence
+  // is unresolved rather than selected arbitrarily or satisfied by cache.
+  CHECK(WriteBinary(source_root / "card0-HDMI-A-2" / "edid", pa1000));
+  CHECK(source_resolver.resolve().address == 0x1000);
+  drm_edids["card0-HDMI-A-2"] = pa2100;
+  CHECK(source_resolver.resolve().status == PhysicalAddressStatus::Unavailable);
+
+  // Multiple cards remain correlated by the exact connector passed to the
+  // DRM reader. Disconnected connectors never request a property.
+  drm_edids["card0-HDMI-A-2"] = pa1000;
+  CHECK(WriteConnector(source_root, "card1-HDMI-A-3", true,
+                       std::vector<std::uint8_t>{}));
+  drm_edids["card1-HDMI-A-3"] = pa2100;
+  drm_requests.clear();
+  CHECK(source_resolver.resolve().status == PhysicalAddressStatus::Ambiguous);
+  CHECK(drm_requests ==
+        (std::vector<std::string>{"card0-HDMI-A-2", "card1-HDMI-A-3"}));
+  { std::ofstream(source_root / "card1-HDMI-A-3" / "status")
+        << "disconnected\n"; }
+  drm_requests.clear();
+  CHECK(source_resolver.resolve().address == 0x1000);
+  CHECK(drm_requests == std::vector<std::string>{"card0-HDMI-A-2"});
+
+  // Missing property/blob/read failure remains unresolved and prevents a
+  // known connector from justifying a partial Available topology.
+  drm_edids["card0-HDMI-A-2"] = std::nullopt;
+  std::filesystem::remove(source_root / "card0-HDMI-A-2" / "edid");
+  CHECK(source_resolver.resolve().status == PhysicalAddressStatus::Unavailable);
+  CHECK(WriteConnector(source_root, "card1-HDMI-A-3", true, pa2100));
+  CHECK(source_resolver.resolve().status == PhysicalAddressStatus::Ambiguous);
 
   std::filesystem::remove_all(root);
   return EXIT_SUCCESS;

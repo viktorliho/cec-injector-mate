@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -40,6 +41,9 @@ struct PhysicalAddressCacheEntry {
   bool operator==(const PhysicalAddressCacheEntry&) const = default;
 };
 
+using DrmEdidReader = std::function<std::optional<std::vector<std::uint8_t>>(
+    const std::filesystem::path& connector)>;
+
 [[nodiscard]] bool physical_address_valid_for_source(std::uint16_t address);
 [[nodiscard]] EdidPhysicalAddressResult parse_edid_physical_address(
     std::span<const std::uint8_t> edid);
@@ -57,13 +61,22 @@ load_physical_address_cache(const std::filesystem::path& path);
 class LinuxPhysicalAddressResolver {
  public:
   LinuxPhysicalAddressResolver(std::filesystem::path drm_root,
-                               std::filesystem::path cache_path);
+                               std::filesystem::path cache_path,
+                               DrmEdidReader drm_edid_reader = {});
 
   [[nodiscard]] PhysicalAddressResolution resolve() const;
+  // Read-only live query for platform diagnostics. It neither reads nor
+  // writes the configured cache.
+  [[nodiscard]] PhysicalAddressResolution resolve_live() const;
 
  private:
   std::filesystem::path drm_root_;
   std::filesystem::path cache_path_;
+  DrmEdidReader drm_edid_reader_;
 };
+
+// Linux production source. Correlates the sysfs connector with its DRM card
+// and connector id before reading the KMS EDID property.
+[[nodiscard]] DrmEdidReader create_libdrm_edid_reader();
 
 }  // namespace cec_injector::mate::linux_platform

@@ -19,9 +19,11 @@ hardware. The opt-in Linux build also compiles the production libudev source.
 
 Linux physical-address tests construct public synthetic checksum-valid EDID
 blocks in memory. They cover structural and CTA HDMI VSDB parsing, PA topology
-validation, deterministic DRM connector observations, filesystem read
-failures, unique/ambiguous resolution, and topology-bound atomic cache
-fallback. No private display capture or machine-specific PA is included.
+validation, mixed connector/non-connector DRM class layouts, sysfs/native-DRM
+EDID source selection and conflict handling, multi-card correlation seams,
+filesystem/property failures, unique/ambiguous resolution, and topology-bound
+atomic cache fallback. No private display capture or machine-specific PA is
+included.
 
 Linux remote-input tests use an in-memory sink to verify generic/profile
 mapping boundaries, key/chord ordering, key-plus-sync emission, duplicate

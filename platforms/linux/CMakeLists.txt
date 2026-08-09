@@ -124,7 +124,13 @@ if(CEC_INJECTOR_MATE_BUILD_LINUX)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBUDEV REQUIRED IMPORTED_TARGET libudev)
     pkg_check_modules(LIBSYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
+    pkg_check_modules(LIBDRM REQUIRED IMPORTED_TARGET libdrm)
     find_package(Threads REQUIRED)
+
+    target_sources(cec_injector_mate_linux_physical_address PRIVATE
+        src/libdrm_edid_source.cpp)
+    target_link_libraries(cec_injector_mate_linux_physical_address PRIVATE
+        PkgConfig::LIBDRM)
 
     add_library(cec_injector_mate_linux_discovery
         src/udev_device_discovery.cpp

@@ -18,7 +18,12 @@ no libudev dependency. Production enumeration and monitoring are enabled with
 complete re-enumeration after relevant tty add, remove, or change events.
 
 Physical addresses are resolved from checksum-valid EDID on currently
-connected DRM connectors; no HDMI port or PA is hardcoded. Zero unique PAs is
+connected DRM connectors; non-connector DRM class entries are ignored. A
+valid sysfs EDID is accepted, while the native libdrm EDID property provides
+the fallback used when sysfs is empty or invalid. Conflicting independently
+valid sources remain unresolved. No HDMI port or PA is hardcoded. The opt-in
+Linux build therefore requires system libdrm in addition to libudev and
+libsystemd. Zero unique PAs is
 `Unavailable`, one is `Available`, and multiple different PAs is `Ambiguous`.
 Identical PA values are deduplicated because the HostPlatform result requires
 the numeric source address, while different values fail closed.
