@@ -54,3 +54,10 @@ including the proven 0x71--0x74 semantic overrides. The
 full Linux+libCEC build also tests current-inventory locator validation without
 opening hardware. Hardware validation remains distinct from native CTest
 results.
+
+Production packaging also simulates early boot with serial/DRM and
+uinput/Wake becoming ready independently. Boot readiness succeeds without
+uinput, daemon readiness waits for its larger resource set, missing resources
+time out, and unit structure preserves Boot/passive-daemon separation. The
+controlled Linux composition test constructs the Boot profile with an unusable
+uinput endpoint to prove remote-input initialization is absent.

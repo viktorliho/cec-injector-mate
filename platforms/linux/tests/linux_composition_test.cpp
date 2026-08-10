@@ -1,6 +1,7 @@
 #include "cec_injector/mate/linux/linux_device_session_factory.h"
 
 #include <cstdlib>
+#include <filesystem>
 #include <memory>
 #include <vector>
 
@@ -10,6 +11,21 @@ using namespace cec_injector::mate;
 using namespace cec_injector::mate::linux_platform;
 
 int main() {
+  // Boot composition must not construct logind/uinput daemon facilities.
+  // An unusable uinput endpoint therefore cannot prevent boot composition.
+  {
+    LinuxHostPlatformConfiguration configuration;
+    configuration.profile = LinuxHostPlatformProfile::Boot;
+    configuration.uinput_endpoint = "/definitely-unavailable-uinput";
+    configuration.drm_root = "/definitely-unavailable-drm";
+    configuration.physical_address_cache =
+        std::filesystem::temp_directory_path() / "cec-mate-boot-pa-cache";
+    LinuxHostPlatform boot_host(std::move(configuration));
+    CHECK(boot_host.reset_remote_input() == OperationResult::Success);
+    CHECK(boot_host.request_system_suspend() == OperationResult::Unsupported);
+    CHECK(boot_host.suspend_authorization() == AuthorizationState::Unavailable);
+  }
+
   auto inventory = std::make_shared<LinuxDeviceInventory>();
   const LinuxDeviceCandidate candidate{
       "/dev/ttyACM7", "/dev/serial/by-id/usb-reference", 0xcafe, 0xcec1,

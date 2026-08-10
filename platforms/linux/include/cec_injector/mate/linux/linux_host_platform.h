@@ -12,6 +12,8 @@
 
 namespace cec_injector::mate::linux_platform {
 
+enum class LinuxHostPlatformProfile { Daemon, Boot };
+
 struct LinuxInventoryEntry {
   DiscoveredDevice discovered;
   std::filesystem::path explicit_port;
@@ -39,6 +41,7 @@ struct LinuxHostPlatformConfiguration {
   std::filesystem::path sys_root{"/sys"};
   std::filesystem::path uinput_endpoint{"/dev/uinput"};
   LinuxRemoteInputProfile input_profile;
+  LinuxHostPlatformProfile profile{LinuxHostPlatformProfile::Daemon};
 };
 
 class LinuxHostPlatform final : public HostPlatform {

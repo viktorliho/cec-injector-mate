@@ -102,6 +102,11 @@ int main(int argc, char** argv) {
     return 2;
   }
 
+  if (boot_once) {
+    host_configuration.profile = LinuxHostPlatformProfile::Boot;
+    service_configuration.maintain_session_wake = false;
+  }
+
   try {
     LinuxHostPlatform host(std::move(host_configuration));
     LinuxDeviceSessionFactory factory(host.inventory());
@@ -112,20 +117,33 @@ int main(int argc, char** argv) {
     if (service.start() != OperationResult::Success) return 1;
     if (boot_once) {
       const auto deadline = std::chrono::steady_clock::now() + startup_timeout;
+      const auto started = std::chrono::steady_clock::now();
+      bool waiting_logged = false;
       using namespace std::chrono_literals;
       while (std::chrono::steady_clock::now() < deadline) {
         service.wait_idle();
         if (service.has_active_session()) break;
+        if (!waiting_logged) {
+          std::cerr << "cec-injector-mate: readiness profile=boot waiting "
+                       "resource=session\n";
+          waiting_logged = true;
+        }
         std::this_thread::sleep_for(500ms);
         service.refresh_discovery();
       }
       service.wait_idle();
       if (!service.has_active_session()) {
-        std::cerr << "cec-injector-mate: boot trigger timed out waiting for "
-                     "DeviceSession\n";
+        const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - started);
+        std::cerr << "cec-injector-mate: readiness timeout profile=boot "
+                     "resource=session duration_ms=" << duration.count() << '\n';
         service.shutdown();
         return 1;
       }
+      const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - started);
+      std::cerr << "cec-injector-mate: readiness profile=boot ready duration_ms="
+                << duration.count() << '\n';
       service.trigger_boot();
       service.wait_idle();
       service.shutdown();

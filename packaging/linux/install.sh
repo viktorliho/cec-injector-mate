@@ -87,6 +87,7 @@ cp -a -- "$bundle/." "$stage/"
 install -d -m 0755 "$stage/libexec"
 install -m 0755 "$source_dir/health-check.sh" "$stage/libexec/health-check"
 install -m 0755 "$source_dir/diagnostics.sh" "$stage/libexec/diagnostics"
+install -m 0755 "$source_dir/readiness.sh" "$stage/libexec/readiness"
 find "$stage" -type d -exec chmod 0755 {} +
 find "$stage" -type f -exec chmod go-w {} +
 chmod 0755 "$stage/bin/cec-injector-mate"

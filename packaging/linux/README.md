@@ -42,6 +42,21 @@ the DeviceSession first, waits for it, submits the existing typed
 to start. The installer starts only the passive service; the oneshot first runs
 on the next ordinary boot.
 
+Boot uses a minimal Linux composition: discovery, PA, Remote Wake environment,
+and DeviceSession support, with no uinput or long-running logind runtime. Its
+existing 30-second session deadline covers asynchronous serial/PA/session
+readiness. The daemon runs the immutable release helper
+`/opt/cec-injector-mate/current/libexec/readiness daemon 30` as its real service
+identity and `video` supplementary group before process start. The helper tests
+effective serial, primary DRM, uinput, and selected USB Wake access, changes no
+permissions, and logs only wait-state changes, ready, or timeout. The complete
+service start is bounded by `TimeoutStartSec=45s`; restart-on-failure remains a
+safety net rather than the normal udev readiness mechanism.
+
+Boot failure does not block the daemon because the units intentionally use
+ordering without `Requires=`. This keeps passive CEC service available after a
+missed Boot action and ensures normal daemon restart never invokes Boot.
+
 `/opt/cec-injector-mate/current/libexec/health-check` correlates diagnostics with the
 current systemd invocation and checks the selected serial, PA, session, Wake,
 input permission, and lifecycle inhibitors. `uninstall.sh` removes only public

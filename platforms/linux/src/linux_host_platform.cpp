@@ -82,11 +82,16 @@ struct LinuxHostPlatform::Impl {
         physical_address(std::move(configuration.drm_root),
                          std::move(configuration.physical_address_cache),
                          create_libdrm_edid_reader()),
-        power(create_linux_power_session_runtime()),
-        remote_input(create_linux_uinput_sink(
-                         std::move(configuration.uinput_endpoint)),
-                     std::move(configuration.input_profile)),
+        profile(configuration.profile),
         remote_wake(std::move(configuration.sys_root)) {}
+
+  void start_daemon_components(LinuxHostPlatformConfiguration configuration) {
+    if (profile != LinuxHostPlatformProfile::Daemon) return;
+    power = create_linux_power_session_runtime();
+    remote_input = std::make_unique<LinuxRemoteInputController>(
+        create_linux_uinput_sink(std::move(configuration.uinput_endpoint)),
+        std::move(configuration.input_profile));
+  }
 
   void refresh_inventory() noexcept {
     try {
@@ -100,8 +105,9 @@ struct LinuxHostPlatform::Impl {
   std::shared_ptr<LinuxDeviceInventory> inventory;
   LinuxDeviceDiscovery discovery;
   LinuxPhysicalAddressResolver physical_address;
+  LinuxHostPlatformProfile profile;
   std::unique_ptr<LinuxPowerSessionRuntime> power;
-  LinuxRemoteInputController remote_input;
+  std::unique_ptr<LinuxRemoteInputController> remote_input;
   LinuxRemoteWakeEnvironment remote_wake;
   std::mutex input_mutex;
   mutable std::mutex observer_mutex;
@@ -112,8 +118,13 @@ struct LinuxHostPlatform::Impl {
 
 LinuxHostPlatform::LinuxHostPlatform(LinuxHostPlatformConfiguration configuration)
     : inventory_(std::make_shared<LinuxDeviceInventory>()),
-      impl_(std::make_unique<Impl>(std::move(configuration), inventory_)) {
+      impl_(std::make_unique<Impl>(configuration, inventory_)) {
   impl_->refresh_inventory();
+  impl_->start_daemon_components(std::move(configuration));
+  if (impl_->profile == LinuxHostPlatformProfile::Boot) {
+    impl_->discovery.start();
+    return;
+  }
   impl_->power->set_notification_sink([this](HostLifecycleNotification value) {
     std::lock_guard lock(impl_->observer_mutex);
     if (impl_->observer) {
@@ -125,7 +136,7 @@ LinuxHostPlatform::LinuxHostPlatform(LinuxHostPlatformConfiguration configuratio
   }
   {
     std::lock_guard lock(impl_->input_mutex);
-    if (impl_->remote_input.initialize() != OperationResult::Success) {
+    if (impl_->remote_input->initialize() != OperationResult::Success) {
       impl_->power->stop();
       throw std::runtime_error("Linux remote-input backend failed to initialize");
     }
@@ -136,7 +147,7 @@ LinuxHostPlatform::LinuxHostPlatform(LinuxHostPlatformConfiguration configuratio
     while (!impl_->stopping.load()) {
       std::this_thread::sleep_for(50ms);
       std::lock_guard lock(impl_->input_mutex);
-      (void)impl_->remote_input.tick();
+      (void)impl_->remote_input->tick();
     }
   });
 }
@@ -149,10 +160,14 @@ LinuxHostPlatform::~LinuxHostPlatform() {
   impl_->stopping = true;
   if (impl_->input_timer.joinable()) impl_->input_timer.join();
   impl_->discovery.stop();
-  impl_->power->set_notification_sink({});
-  impl_->power->stop();
-  std::lock_guard lock(impl_->input_mutex);
-  (void)impl_->remote_input.reset_remote_input();
+  if (impl_->power) {
+    impl_->power->set_notification_sink({});
+    impl_->power->stop();
+  }
+  if (impl_->remote_input) {
+    std::lock_guard lock(impl_->input_mutex);
+    (void)impl_->remote_input->reset_remote_input();
+  }
 }
 
 void LinuxHostPlatform::set_lifecycle_observer(HostLifecycleObserver* observer) {
@@ -171,15 +186,18 @@ PhysicalAddressResolution LinuxHostPlatform::resolve_physical_address() {
 }
 
 OperationResult LinuxHostPlatform::request_system_suspend() {
-  return impl_->power->request_system_suspend();
+  return impl_->power ? impl_->power->request_system_suspend()
+                      : OperationResult::Unsupported;
 }
 
 HostPowerState LinuxHostPlatform::host_power_state() const noexcept {
-  return impl_->power->host_power_state();
+  return impl_->power ? impl_->power->host_power_state()
+                      : HostPowerState::Running;
 }
 
 AuthorizationState LinuxHostPlatform::suspend_authorization() const {
-  return impl_->power->suspend_authorization();
+  return impl_->power ? impl_->power->suspend_authorization()
+                      : AuthorizationState::Unavailable;
 }
 
 AuthorizationState LinuxHostPlatform::remote_wake_authorization(
@@ -190,12 +208,15 @@ AuthorizationState LinuxHostPlatform::remote_wake_authorization(
 OperationResult LinuxHostPlatform::emit_remote_action(
     SemanticRemoteAction action, RemoteActionState state) {
   std::lock_guard lock(impl_->input_mutex);
-  return impl_->remote_input.emit_remote_action(action, state);
+  return impl_->remote_input
+             ? impl_->remote_input->emit_remote_action(action, state)
+             : OperationResult::Unsupported;
 }
 
 OperationResult LinuxHostPlatform::reset_remote_input() {
   std::lock_guard lock(impl_->input_mutex);
-  return impl_->remote_input.reset_remote_input();
+  return impl_->remote_input ? impl_->remote_input->reset_remote_input()
+                             : OperationResult::Success;
 }
 
 }  // namespace cec_injector::mate::linux_platform

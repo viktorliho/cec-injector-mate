@@ -372,11 +372,14 @@ void TestGenerationAndBoot() {
   host.inventory = {Device("a", "opaque-a")};
   MateServiceConfiguration configuration;
   configuration.policy.power_on_boot = true;
+  configuration.maintain_session_wake = false;
   MateService service(host, factory, configuration);
   REQUIRE(service.start() == OperationResult::Success);
   service.wait_idle();
   auto first = factory.records.back();
   REQUIRE(first->powers == 0 && first->active_sources == 0);
+  REQUIRE(first->wake_queries == 0 && first->wake_configures == 0 &&
+          first->wake_arms == 0 && first->wake_disarms == 0);
   first->lose_on_power = true;
   service.trigger_boot();
   service.wait_idle();
@@ -386,6 +389,58 @@ void TestGenerationAndBoot() {
   REQUIRE(factory.records.back()->powers == 0);
   REQUIRE(factory.records.back()->active_sources == 0);
   service.shutdown();
+}
+
+void TestBootWaitsForSelectionAndPaWithoutSessionMaintenance() {
+  FakeHost host;
+  FakeFactory factory;
+  MateServiceConfiguration configuration;
+  configuration.policy.power_on_boot = true;
+  configuration.maintain_session_wake = false;
+  MateService service(host, factory, configuration);
+  REQUIRE(service.start() == OperationResult::Success);
+  service.wait_idle();
+  REQUIRE(!service.has_active_session());
+
+  host.inventory = {Device("a", "opaque-a")};
+  host.pa = {PhysicalAddressStatus::Unavailable, std::nullopt};
+  service.refresh_discovery();
+  service.wait_idle();
+  REQUIRE(!service.has_active_session());
+  REQUIRE(factory.records.empty());
+
+  host.pa = {PhysicalAddressStatus::Available, 0x1000};
+  service.refresh_discovery();
+  service.wait_idle();
+  REQUIRE(service.has_active_session());
+  auto record = factory.records.back();
+  REQUIRE(record->wake_queries == 0 && record->wake_configures == 0 &&
+          record->wake_arms == 0 && record->wake_disarms == 0);
+
+  // A replacement session during readiness still cannot create Boot intent.
+  record->change_state(SessionState::Disconnected);
+  service.wait_idle();
+  REQUIRE(factory.records.size() == 2);
+  REQUIRE(record->powers == 0 && record->active_sources == 0);
+  record = factory.records.back();
+  REQUIRE(record->powers == 0 && record->active_sources == 0);
+
+  service.trigger_boot();
+  service.wait_idle();
+  REQUIRE(record->powers == 1);
+  REQUIRE(record->active_sources == 1);
+  service.shutdown();
+  REQUIRE(record->disconnects == 1);
+
+  FakeHost unavailable_host;
+  FakeFactory unavailable_factory;
+  MateService unavailable(unavailable_host, unavailable_factory,
+                          configuration);
+  REQUIRE(unavailable.start() == OperationResult::Success);
+  unavailable.wait_idle();
+  // The bounded caller never submits Boot after its readiness deadline.
+  unavailable.shutdown();
+  REQUIRE(unavailable_factory.records.empty());
 }
 
 void TestWakeFailureStillCompletesTransition() {
@@ -838,6 +893,7 @@ int main() {
   TestDiscoveryAndPa();
   TestInputStandbyAndLifecycle();
   TestGenerationAndBoot();
+  TestBootWaitsForSelectionAndPaWithoutSessionMaintenance();
   TestWakeFailureStillCompletesTransition();
   TestWakeAuthorizationAndHoldCancellation();
   TestResumeRecoveryImmediateAndDelayed();

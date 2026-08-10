@@ -206,6 +206,7 @@ struct MateService::Impl {
         registry(), policy(configuration.policy), events(32),
         explicit_selection(std::move(configuration.selected_device)),
         resume_recovery_timeout(configuration.resume_recovery_timeout),
+        maintain_session_wake(configuration.maintain_session_wake),
         diagnostics(std::move(sink)) {}
 
   void log(std::string_view message) {
@@ -481,8 +482,10 @@ struct MateService::Impl {
                     (resume_recovery ? "pending" : "none"));
       }
       expire_resume_recovery();
-      execute_event(LifecycleEvent::SessionConnected, nullptr,
-                    task.generation);
+      if (maintain_session_wake) {
+        execute_event(LifecycleEvent::SessionConnected, nullptr,
+                      task.generation);
+      }
       continue_resume_recovery(task);
     } else if (task.session_state == SessionState::Disconnected) {
       if (diagnostics) {
@@ -929,6 +932,7 @@ struct MateService::Impl {
   SemanticEventQueue events;
   std::optional<DeviceId> explicit_selection;
   const std::chrono::milliseconds resume_recovery_timeout;
+  const bool maintain_session_wake;
   DiagnosticSink diagnostics;
   std::vector<DiscoveredDevice> inventory;
   bool discovery_snapshot_logged{};

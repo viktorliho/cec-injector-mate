@@ -19,6 +19,7 @@ struct MateServiceConfiguration {
   std::optional<DeviceId> selected_device;
   std::chrono::milliseconds resume_recovery_timeout{
       std::chrono::seconds(30)};
+  bool maintain_session_wake{true};
 };
 
 class MateService final : public HostLifecycleObserver {

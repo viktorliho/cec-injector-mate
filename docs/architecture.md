@@ -99,6 +99,19 @@ diagnostic anomaly, not silently reclassified success. Missing/wrong TV action,
 suspend or Wake failure, broken/stuck input, unrecovered session, restart loop,
 or reconnect failure remains a hard user-visible failure.
 
+Installed Boot remains an explicit oneshot before the passive daemon. Its
+Linux HostPlatform profile includes discovery, PA resolution, the read-only
+Remote Wake environment, and DeviceSession construction, but does not create
+uinput or start long-running logind lifecycle observation. The existing
+30-second DeviceSession readiness budget therefore covers late serial
+discovery, PA resolution, and session connection without making remote input a
+Boot dependency. The full daemon composition has a separate bounded pre-start
+effective-access gate for serial, DRM, uinput, and selected USB Wake state.
+
+Boot failure orders but does not inhibit the daemon: there is intentionally no
+`Requires=` edge. This preserves passive Mate availability after a missed Boot
+action, while a daemon restart cannot pull in the oneshot or replay Boot.
+
 Live/cache physical-address provenance, richer authorization diagnostics,
 cache topology identity, and asynchronous suspend diagnostics remain future
 implementation concerns; they do not expand the HostPlatform contract here.

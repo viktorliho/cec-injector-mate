@@ -33,6 +33,7 @@ service=$root/etc/systemd/system/cec-injector-mate.service
 boot=$root/etc/systemd/system/cec-injector-mate-boot.service
 health=$root/opt/cec-injector-mate/current/libexec/health-check
 diagnostics=$root/opt/cec-injector-mate/current/libexec/diagnostics
+readiness=$root/opt/cec-injector-mate/current/libexec/readiness
 
 test "$(basename "$device_rule")" = 80-cec-injector-mate-device.rules
 test "$(basename "$platform_rule")" = 80-cec-injector-mate-platform.rules
@@ -87,17 +88,26 @@ printf '%s\n' "$unit_section" | grep -Fq 'StartLimitBurst=3'
 grep -Fq -- '--device-id linux-usb-serial-v1:544553542D50524F44554354494F4E2D53455249414C' "$service"
 grep -Fq 'After=cec-injector-mate-boot.service' "$service"
 ! grep -Fq 'Wants=cec-injector-mate-boot.service' "$service"
+! grep -Fq 'Requires=cec-injector-mate-boot.service' "$service"
 ! grep -Fq -- '--boot-once' "$service"
 grep -Fq -- '--boot-once --startup-timeout 30' "$boot"
 grep -Fq 'Before=cec-injector-mate.service' "$boot"
 test -x "$health"
 test -x "$diagnostics"
+test -x "$readiness"
 grep -Fq -- '--diagnostics' "$health"
 grep -Fq 'journalctl -u "$service"' "$diagnostics"
 grep -Fq 'journalctl -u "$boot_service"' "$diagnostics"
 grep -Fq 'current/MANIFEST.txt' "$diagnostics"
 grep -Fq 'boot_id=' "$diagnostics"
 ! grep -Eq '(/home/|\.ssh|journalctl( |.* )--system)' "$diagnostics"
+grep -Fq 'ExecStartPre=/opt/cec-injector-mate/current/libexec/readiness daemon 30' "$service"
+grep -Fq 'TimeoutStartSec=45s' "$service"
+! grep -Fq 'ExecStartPre=' "$boot"
+! grep -Fq -- '--uinput' "$boot"
+! grep -Fq -- '--remote-profile' "$boot"
+grep -Fq -- '--power-on-boot' "$boot"
+! grep -Fq -- '--power-on-resume' "$boot"
 ! find "$root" -path '*/usr/libexec/*' -print | grep -q .
 
 # The narrow staging seam proves the bug-bundle helper exits successfully and
@@ -118,6 +128,48 @@ unit-properties.txt
 unit-status.txt
 EOF
 cmp "$fixture/expected-diagnostic-files" "$fixture/diagnostic-files"
+
+# Simulate early boot with independently appearing resources. Boot readiness
+# never depends on uinput; daemon readiness waits for it and Wake after Boot.
+ready_root=$fixture/readiness-root
+mkdir -p "$ready_root/etc/cec-injector-mate" "$ready_root/dev/serial/by-id" \
+  "$ready_root/dev/dri" "$ready_root/sys/bus/usb/devices/1-2/power"
+cat >"$ready_root/etc/cec-injector-mate/installation.conf" <<EOF
+CEC_MATE_VENDOR=cafe
+CEC_MATE_PRODUCT=cec1
+CEC_MATE_SERIAL=$serial
+EOF
+CEC_MATE_READINESS_ROOT=$ready_root "$readiness" boot 2 \
+  2>"$fixture/boot-readiness.log" &
+boot_pid=$!
+sleep 0.2
+touch "$ready_root/dev/tty-selected" "$ready_root/dev/dri/card0"
+ln -s ../../tty-selected "$ready_root/dev/serial/by-id/usb-test-$serial"
+wait "$boot_pid"
+grep -Fq 'readiness profile=boot waiting resource=serial' "$fixture/boot-readiness.log"
+grep -Fq 'readiness profile=boot ready duration_ms=' "$fixture/boot-readiness.log"
+test ! -e "$ready_root/dev/uinput"
+
+CEC_MATE_READINESS_ROOT=$ready_root "$readiness" daemon 2 \
+  2>"$fixture/daemon-readiness.log" &
+daemon_pid=$!
+sleep 0.2
+touch "$ready_root/dev/uinput"
+printf 'cafe\n' >"$ready_root/sys/bus/usb/devices/1-2/idVendor"
+printf 'cec1\n' >"$ready_root/sys/bus/usb/devices/1-2/idProduct"
+printf '%s\n' "$serial" >"$ready_root/sys/bus/usb/devices/1-2/serial"
+printf 'enabled\n' >"$ready_root/sys/bus/usb/devices/1-2/power/wakeup"
+wait "$daemon_pid"
+grep -Fq 'readiness profile=daemon waiting resource=uinput' "$fixture/daemon-readiness.log"
+grep -Fq 'readiness profile=daemon ready duration_ms=' "$fixture/daemon-readiness.log"
+
+rm -f "$ready_root/dev/uinput"
+if CEC_MATE_READINESS_ROOT=$ready_root "$readiness" daemon 1 \
+    2>"$fixture/readiness-timeout.log"; then
+  echo 'daemon readiness unexpectedly succeeded without uinput' >&2
+  exit 1
+fi
+grep -Fq 'readiness timeout profile=daemon resource=uinput' "$fixture/readiness-timeout.log"
 
 # Reinstalling for a new serial replaces, rather than accumulates, rules.
 CEC_MATE_ROOT=$root "$packaging/install.sh" "$bundle" cafe cec1 TEST-SECOND-SERIAL
