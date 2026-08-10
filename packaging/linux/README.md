@@ -49,5 +49,14 @@ integration and program files and preserves `/etc/cec-injector-mate` and
 `/var/lib/cec-injector-mate` by default. `--purge-state` removes persistent
 state explicitly.
 
+For an immediate post-anomaly snapshot, run
+`sudo /opt/cec-injector-mate/current/libexec/health-check --diagnostics`.
+It separates directly observable health from lifecycle and operation evidence
+that requires journal correlation. The project-only bug bundle helper is
+`sudo /opt/cec-injector-mate/current/libexec/diagnostics [OUTPUT.tar.gz]`;
+it captures the two Mate unit journals, unit status, selected-device permission
+and Wake state, installed manifest, boot ID, and the diagnostic health snapshot.
+It does not upload data or inspect unrelated user files.
+
 The pinned Debian 12 build recipe is under `debian12/`. SteamOS atomic-update
 and RAUC persistence remain deliberately deferred.

@@ -32,6 +32,7 @@ polkit=$root/etc/polkit-1/rules.d/49-cec-injector-mate-suspend.rules
 service=$root/etc/systemd/system/cec-injector-mate.service
 boot=$root/etc/systemd/system/cec-injector-mate-boot.service
 health=$root/opt/cec-injector-mate/current/libexec/health-check
+diagnostics=$root/opt/cec-injector-mate/current/libexec/diagnostics
 
 test "$(basename "$device_rule")" = 80-cec-injector-mate-device.rules
 test "$(basename "$platform_rule")" = 80-cec-injector-mate-platform.rules
@@ -90,7 +91,33 @@ grep -Fq 'After=cec-injector-mate-boot.service' "$service"
 grep -Fq -- '--boot-once --startup-timeout 30' "$boot"
 grep -Fq 'Before=cec-injector-mate.service' "$boot"
 test -x "$health"
+test -x "$diagnostics"
+grep -Fq -- '--diagnostics' "$health"
+grep -Fq 'journalctl -u "$service"' "$diagnostics"
+grep -Fq 'journalctl -u "$boot_service"' "$diagnostics"
+grep -Fq 'current/MANIFEST.txt' "$diagnostics"
+grep -Fq 'boot_id=' "$diagnostics"
+! grep -Eq '(/home/|\.ssh|journalctl( |.* )--system)' "$diagnostics"
 ! find "$root" -path '*/usr/libexec/*' -print | grep -q .
+
+# The narrow staging seam proves the bug-bundle helper exits successfully and
+# contains only its fixed project evidence set; failed live probes stay inside
+# health.txt rather than expanding collection scope.
+archive=$fixture/diagnostics.tar.gz
+CEC_MATE_ROOT=$root "$diagnostics" "$archive" >/dev/null
+tar -tzf "$archive" | sed 's|^\./||' | sed '/^$/d' | sort \
+  >"$fixture/diagnostic-files"
+cat >"$fixture/expected-diagnostic-files" <<EOF
+boot-journal.txt
+device-state.txt
+health.txt
+identity.txt
+main-journal.txt
+manifest.txt
+unit-properties.txt
+unit-status.txt
+EOF
+cmp "$fixture/expected-diagnostic-files" "$fixture/diagnostic-files"
 
 # Reinstalling for a new serial replaces, rather than accumulates, rules.
 CEC_MATE_ROOT=$root "$packaging/install.sh" "$bundle" cafe cec1 TEST-SECOND-SERIAL

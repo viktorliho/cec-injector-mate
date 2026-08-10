@@ -479,10 +479,10 @@ bool HasDiagnostic(const std::vector<std::string>& diagnostics,
 }
 
 std::size_t CountDiagnostic(const std::vector<std::string>& diagnostics,
-                            std::string_view exact) {
+                            std::string_view fragment) {
   std::size_t count = 0;
   for (const auto& diagnostic : diagnostics) {
-    if (diagnostic == exact) ++count;
+    if (diagnostic.find(fragment) != std::string::npos) ++count;
   }
   return count;
 }
@@ -521,7 +521,8 @@ void TestResumeRecoveryImmediateAndDelayed() {
   service.wait_idle();
   REQUIRE(first->refreshes == 1);
   REQUIRE(first->powers == 0 && first->active_sources == 0);
-  REQUIRE(HasDiagnostic(diagnostics, "Resume recovery pending"));
+  REQUIRE(HasDiagnostic(diagnostics,
+                        "path=DEFERRED_RESUME_RECOVERY state=pending"));
 
   auto recovered = RecoverSameDevice(service, factory, first);
   REQUIRE(recovered != first);
@@ -529,23 +530,30 @@ void TestResumeRecoveryImmediateAndDelayed() {
   REQUIRE(recovered->powers == 1);
   REQUIRE(recovered->active_sources == 1);
   REQUIRE(recovered->wake_reads == 1);
-  REQUIRE(HasDiagnostic(diagnostics, "Resume recovery session restored"));
-  REQUIRE(HasDiagnostic(diagnostics, "Resume continuation generation"));
+  REQUIRE(HasDiagnostic(diagnostics,
+                        "path=DEFERRED_RESUME_RECOVERY state=session_restored"));
+  REQUIRE(HasDiagnostic(diagnostics, "resume continuation generation="));
   REQUIRE(CountDiagnostic(
               diagnostics,
-              "policy intent RefreshDeviceSession result 5") == 1);
+              "operation complete name=RefreshDeviceSession result=Timeout") == 1);
   REQUIRE(CountDiagnostic(
               diagnostics,
-              "policy intent RefreshDeviceSession result 0") == 1);
+              "operation complete name=RefreshDeviceSession result=Success") == 1);
   REQUIRE(CountDiagnostic(diagnostics,
-                          "policy intent PowerOnTv result 0") == 1);
+                          "operation complete name=PowerOnTv result=Success") == 1);
   REQUIRE(CountDiagnostic(diagnostics,
-                          "policy intent MakeActiveSource result 0") == 1);
+                          "operation complete name=MakeActiveSource result=Success") == 1);
   REQUIRE(CountDiagnostic(diagnostics,
-                          "policy intent ReadWakeReason result 0") == 1);
+                          "operation complete name=ReadWakeReason result=Success") == 1);
   REQUIRE(CountDiagnostic(
               diagnostics,
-              "policy intent CompleteHostTransition result 0") == 1);
+              "operation complete name=CompleteHostTransition result=Success") == 1);
+  REQUIRE(HasDiagnostic(diagnostics,
+                        "operation start name=PowerOnTv lifecycle=resume"));
+  REQUIRE(HasDiagnostic(diagnostics, "duration_ms="));
+  REQUIRE(HasDiagnostic(diagnostics, "selection=1 generation="));
+  REQUIRE(HasDiagnostic(diagnostics,
+                        "path=DEFERRED_RESUME_RECOVERY state=complete"));
 
   recovered->change_state(SessionState::Connected);
   service.wait_idle();
@@ -574,7 +582,8 @@ void TestResumeRecoveryExpiryAndSelectionCancellation() {
     REQUIRE(first->powers == 0);
     service.refresh_discovery();
     service.wait_idle();
-    REQUIRE(HasDiagnostic(diagnostics, "Resume recovery expired"));
+    REQUIRE(HasDiagnostic(diagnostics,
+                          "path=RESUME_RECOVERY_EXPIRED state=expired"));
     auto recovered = RecoverSameDevice(service, factory, first);
     REQUIRE(recovered->powers == 0 && recovered->active_sources == 0);
     service.shutdown();
@@ -598,7 +607,7 @@ void TestResumeRecoveryExpiryAndSelectionCancellation() {
   service.refresh_discovery();
   service.wait_idle();
   REQUIRE(HasDiagnostic(diagnostics,
-                        "Resume recovery cancelled selection changed"));
+                        "resume recovery cancelled reason=selection changed"));
   host.inventory.clear();
   service.refresh_discovery();
   service.wait_idle();
@@ -630,7 +639,8 @@ void TestResumeRecoveryLifecycleCancellation() {
     service.wait_idle();
     host.lifecycle(event);
     service.wait_idle();
-    REQUIRE(HasDiagnostic(diagnostics, "Resume recovery cancelled host"));
+    REQUIRE(HasDiagnostic(diagnostics,
+                          "resume recovery cancelled reason=host"));
     auto recovered = RecoverSameDevice(service, factory, first);
     REQUIRE(recovered->powers == 0 && recovered->active_sources == 0);
     service.shutdown();
@@ -650,7 +660,8 @@ void TestResumeRecoveryLifecycleCancellation() {
   host.lifecycle(HostLifecycleEvent::Resumed);
   service.wait_idle();
   service.shutdown();
-  REQUIRE(HasDiagnostic(diagnostics, "Resume recovery cancelled service stop"));
+  REQUIRE(HasDiagnostic(diagnostics,
+                        "resume recovery cancelled reason=service stop"));
 
   FakeHost supersede_host;
   FakeFactory supersede_factory;
@@ -672,7 +683,7 @@ void TestResumeRecoveryLifecycleCancellation() {
   supersede.wait_idle();
   REQUIRE(HasDiagnostic(
       supersede_diagnostics,
-      "Resume recovery cancelled superseded by HostResumed"));
+      "resume recovery cancelled reason=superseded by HostResumed"));
   REQUIRE(supersede_record->powers == 1);
   REQUIRE(supersede_record->active_sources == 1);
   supersede.shutdown();
@@ -699,7 +710,8 @@ void TestResumeRecoveryGenerationAndFailures() {
     REQUIRE(recovered->powers == 1);
     REQUIRE(recovered->active_sources == 0);
     REQUIRE(HasDiagnostic(
-        diagnostics, "Resume recovery cancelled session generation changed"));
+        diagnostics,
+        "resume recovery cancelled reason=session generation changed"));
     service.wait_idle();
     REQUIRE(factory.records.back()->powers == 0);
     service.shutdown();
@@ -744,7 +756,8 @@ void TestResumeRecoveryGenerationAndFailures() {
     host.lifecycle(HostLifecycleEvent::Resumed);
     service.wait_idle();
     REQUIRE(record->powers == 0 && record->active_sources == 0);
-    REQUIRE(!HasDiagnostic(diagnostics, "Resume recovery pending"));
+    REQUIRE(!HasDiagnostic(
+        diagnostics, "path=DEFERRED_RESUME_RECOVERY state=pending"));
     service.shutdown();
   }
 }
@@ -769,6 +782,56 @@ void TestReconnectAndRestartNeverReplayResume() {
   restarted.shutdown();
 }
 
+void TestDiagnosticSignalAndDiscoveryThrottling() {
+  FakeHost host;
+  FakeFactory factory;
+  std::vector<std::string> diagnostics;
+  host.inventory = {Device("a", "opaque-a")};
+  MateService service(host, factory, ResumeConfiguration(),
+                      [&](std::string_view message) {
+                        diagnostics.emplace_back(message);
+                      });
+  REQUIRE(service.start() == OperationResult::Success);
+  service.wait_idle();
+  service.refresh_discovery();
+  service.refresh_discovery();
+  service.wait_idle();
+  REQUIRE(CountDiagnostic(diagnostics, "discovery changed count=") == 1);
+
+  host.lifecycle(HostLifecycleEvent::Resumed);
+  service.wait_idle();
+  REQUIRE(HasDiagnostic(diagnostics, "host lifecycle event=resume"));
+  REQUIRE(HasDiagnostic(diagnostics,
+                        "lifecycle transaction start lifecycle=resume"));
+  REQUIRE(HasDiagnostic(diagnostics,
+                        "resume path=IMMEDIATE_RESUME state=complete"));
+  REQUIRE(HasDiagnostic(diagnostics,
+                        "operation start name=RefreshDeviceSession"));
+  REQUIRE(HasDiagnostic(
+      diagnostics,
+      "operation complete name=RefreshDeviceSession result=Success duration_ms="));
+
+  factory.records.back()->power_result = OperationResult::Rejected;
+  host.lifecycle(HostLifecycleEvent::Resumed);
+  service.wait_idle();
+  REQUIRE(HasDiagnostic(
+      diagnostics,
+      "operation skipped name=MakeActiveSource reason=skipped_due_to_dependency"));
+  REQUIRE(!HasDiagnostic(
+      diagnostics,
+      "operation complete name=MakeActiveSource result=Rejected"));
+  REQUIRE(HasDiagnostic(
+      diagnostics,
+      "operation start name=ResetRemoteInput lifecycle=resume"));
+  REQUIRE(HasDiagnostic(diagnostics, "generation=none"));
+
+  host.inventory = {Device("a", "opaque-a"), Device("b", "opaque-b")};
+  service.refresh_discovery();
+  service.wait_idle();
+  REQUIRE(CountDiagnostic(diagnostics, "discovery changed count=") == 2);
+  service.shutdown();
+}
+
 }  // namespace
 
 int main() {
@@ -782,5 +845,6 @@ int main() {
   TestResumeRecoveryLifecycleCancellation();
   TestResumeRecoveryGenerationAndFailures();
   TestReconnectAndRestartNeverReplayResume();
+  TestDiagnosticSignalAndDiscoveryThrottling();
   return EXIT_SUCCESS;
 }

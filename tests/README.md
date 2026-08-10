@@ -46,6 +46,8 @@ compiled only by the opt-in Linux build; tests do not contact the system bus.
 
 Service tests use fake HostPlatform and DeviceSession implementations to cover
 selection, PA-gated construction, PA replacement, generation cancellation,
+correlated lifecycle/operation diagnostics, Resume path classification,
+dependency-skip reporting, unchanged-discovery log suppression,
 passive startup, validated CEC User Control and TV Standby translation, Wake
 maintenance, lifecycle holds, policy dependencies, and clean shutdown,
 including the proven 0x71--0x74 semantic overrides. The

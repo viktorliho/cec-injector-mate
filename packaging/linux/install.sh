@@ -22,7 +22,7 @@ test -f "$bundle/MANIFEST.txt" || { echo "bundle manifest is required" >&2; exit
 test -z "$root" || test "${root#/}" != "$root" || { echo "CEC_MATE_ROOT must be absolute" >&2; exit 2; }
 if test -z "$root"; then
   test "$(id -u)" -eq 0 || { echo "installation requires root" >&2; exit 1; }
-  for prerequisite in od udevadm systemctl useradd runuser journalctl systemd-inhibit sha256sum; do
+  for prerequisite in od udevadm systemctl useradd runuser journalctl systemd-inhibit sha256sum tar; do
     command -v "$prerequisite" >/dev/null || { echo "missing prerequisite: $prerequisite" >&2; exit 1; }
   done
   if systemctl is-active --quiet linux-hdmi-cec.service 2>/dev/null; then
@@ -86,6 +86,7 @@ install -d -m 0755 "$stage"
 cp -a -- "$bundle/." "$stage/"
 install -d -m 0755 "$stage/libexec"
 install -m 0755 "$source_dir/health-check.sh" "$stage/libexec/health-check"
+install -m 0755 "$source_dir/diagnostics.sh" "$stage/libexec/diagnostics"
 find "$stage" -type d -exec chmod 0755 {} +
 find "$stage" -type f -exec chmod go-w {} +
 chmod 0755 "$stage/bin/cec-injector-mate"

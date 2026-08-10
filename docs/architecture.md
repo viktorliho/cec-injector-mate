@@ -89,6 +89,16 @@ validated current session generation. A plain reconnect never creates Resume
 semantics, and expiry, selection change, host transition, or shutdown cancels
 the transaction before any later TV action.
 
+Service diagnostics correlate lifecycle epoch, selected Device, selection
+episode, and concrete session generation. Device operations retain their Core
+`OperationResult` while logging start, completion, and elapsed time. In
+particular, a command timeout and externally observed TV UX are separate
+evidence: Mate has no authoritative TV-source confirmation surface. During the
+daily-driver observation period, a correct final UX with a logged timeout is a
+diagnostic anomaly, not silently reclassified success. Missing/wrong TV action,
+suspend or Wake failure, broken/stuck input, unrecovered session, restart loop,
+or reconnect failure remains a hard user-visible failure.
+
 Live/cache physical-address provenance, richer authorization diagnostics,
 cache topology identity, and asynchronous suspend diagnostics remain future
 implementation concerns; they do not expand the HostPlatform contract here.

@@ -3,6 +3,11 @@ set -eu
 
 service=cec-injector-mate.service
 config=/etc/cec-injector-mate/installation.conf
+mode=${1:-}
+test -z "$mode" || test "$mode" = --diagnostics || {
+  echo "usage: health-check [--diagnostics]" >&2
+  exit 2
+}
 test -r "$config" || { echo "FAIL installation configuration"; exit 1; }
 . "$config"
 
@@ -50,5 +55,26 @@ fi
 virtual_inputs=$(grep -lFx 'CEC Injector Mate Remote' /sys/class/input/*/name 2>/dev/null | wc -l)
 test "$virtual_inputs" -eq 1 && echo "PASS uinput backend healthy" || { echo "FAIL uinput backend count $virtual_inputs"; fail=1; }
 systemd-inhibit --list --no-pager | grep -Fq cec-injector-mate && echo "PASS lifecycle inhibitors" || { echo "FAIL lifecycle inhibitors"; fail=1; }
+
+if test "$mode" = --diagnostics; then
+  echo "--- directly observable now ---"
+  echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "service_active=$(systemctl is-active "$service" 2>/dev/null || true)"
+  echo "restart_count=$restarts"
+  echo "service_started=$(systemctl show -p ActiveEnterTimestamp --value "$service")"
+  echo "selected_device=${CEC_MATE_DEVICE_ID:-unknown}"
+  echo "selected_locator_present=$([ -n "$device" ] && echo yes || echo no)"
+  echo "uinput_backend_count=$virtual_inputs"
+  echo "lifecycle_inhibitors=$([ "$(systemd-inhibit --list --no-pager | grep -Fc cec-injector-mate)" -gt 0 ] && echo armed || echo unavailable)"
+  echo "--- requires journal correlation ---"
+  echo "visible_device_count_from_journal=$(printf '%s\n' "$logs" | sed -n 's/.*discovery changed count=//p' | tail -n 1)"
+  echo "physical_address_from_journal=$(printf '%s\n' "$logs" | sed -n 's/.*physical address available //p' | tail -n 1)"
+  echo "session_state_from_journal=$([ "$(printf '%s\n' "$logs" | grep -Fc 'DeviceSession connected')" -gt 0 ] && echo connected || echo unavailable)"
+  echo "session_generation_from_journal=$(printf '%s\n' "$logs" | sed -n 's/.*DeviceSession connected.*generation=\([0-9][0-9]*\).*/\1/p' | tail -n 1)"
+  echo "remote_wake_authorization_from_journal=$([ "$(printf '%s\n' "$logs" | grep -Fc 'Remote Wake authorization Authorized')" -gt 0 ] && echo Authorized || echo unavailable)"
+  echo "wake_state_from_journal=$([ "$(printf '%s\n' "$logs" | grep -Fc 'Wake configured and armed')" -gt 0 ] && echo configured-armed || echo unavailable)"
+  printf '%s\n' "$logs" | grep -E 'host lifecycle event=|lifecycle transaction |resume path=|operation complete name=' | tail -n 20 || true
+  echo "note=authoritative TV source confirmation is unavailable; command result and externally observed UX are separate evidence"
+fi
 
 test "$fail" -eq 0
