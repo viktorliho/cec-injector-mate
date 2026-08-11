@@ -33,10 +33,12 @@ than allowing cache fallback across an unresolved topology.
 The optional cache path is supplied by later composition. Cache v2 stores only
 a live Available PA plus a non-security `topology-v1` key derived from sorted
 connector names and validated EDID base blocks. It is fallback-only for
-Unavailable, never overrides Ambiguous, and is ignored when current topology
-identity cannot be proven or has changed. This permits conservative recovery
-when a validated base block remains visible but the CTA extension is
-temporarily unavailable.
+Unavailable and never overrides Ambiguous. It is accepted when the current
+topology identity matches, or when DRM enumerates connectors but explicitly
+reports every one disconnected (the observed TV-standby/cold-boot state where
+EDID and therefore a live identity are absent). An empty connector inventory,
+an unreadable snapshot, a connected unresolved connector, or a changed live
+identity remains fail-closed.
 
 Linux remote input maps generic semantic navigation and media actions to a
 private Linux key vocabulary. The uinput backend advertises only configured

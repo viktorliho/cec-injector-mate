@@ -155,6 +155,10 @@ LinuxPhysicalAddressObservation observe_physical_address(
   }
 
   LinuxPhysicalAddressObservation observation;
+  observation.all_connectors_disconnected =
+      !connectors.empty() &&
+      std::none_of(connectors.begin(), connectors.end(),
+                   [](const auto& connector) { return connector.connected; });
   observation.topology_identity = TopologyIdentity(connectors);
   if (addresses.size() > 1 ||
       (addresses.size() == 1 && unresolved_connected)) {
@@ -174,8 +178,10 @@ PhysicalAddressResolution apply_physical_address_cache(
   if (live.resolution.status != PhysicalAddressStatus::Unavailable) {
     return live.resolution;
   }
-  if (!cache || !live.topology_identity ||
-      cache->topology_identity != *live.topology_identity ||
+  const bool topology_matches =
+      live.topology_identity &&
+      cache && cache->topology_identity == *live.topology_identity;
+  if (!cache || (!topology_matches && !live.all_connectors_disconnected) ||
       !physical_address_valid_for_source(cache->address)) {
     return live.resolution;
   }

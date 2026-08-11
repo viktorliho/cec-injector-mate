@@ -32,6 +32,10 @@ struct DrmConnectorObservation {
 struct LinuxPhysicalAddressObservation {
   PhysicalAddressResolution resolution;
   std::optional<std::string> topology_identity;
+  // True only when DRM enumerated at least one connector and every connector
+  // explicitly reported disconnected. This is distinct from an empty,
+  // unreadable, or partially unresolved connector snapshot.
+  bool all_connectors_disconnected{};
 };
 
 struct PhysicalAddressCacheEntry {

@@ -158,11 +158,13 @@ int main() {
   auto observation = observe_physical_address({});
   CHECK(observation.resolution.status == PhysicalAddressStatus::Unavailable);
   CHECK(!observation.topology_identity);
+  CHECK(!observation.all_connectors_disconnected);
 
   observation = observe_physical_address(
       {{"card0-HDMI-A-1", true, std::nullopt}});
   CHECK(observation.resolution.status == PhysicalAddressStatus::Unavailable);
   CHECK(!observation.topology_identity);
+  CHECK(!observation.all_connectors_disconnected);
 
   observation = observe_physical_address(
       {{"card0-HDMI-A-1", true, pa1000}});
@@ -187,6 +189,15 @@ int main() {
         PhysicalAddressResolution{PhysicalAddressStatus::Available, 0x1000});
 
   const PhysicalAddressCacheEntry cache{0x1000, first_identity};
+  observation = observe_physical_address(
+      {{"card0-HDMI-A-1", false, std::nullopt},
+       {"card1-DP-1", false, std::nullopt}});
+  CHECK(observation.all_connectors_disconnected);
+  CHECK(apply_physical_address_cache(observation, cache) ==
+        PhysicalAddressResolution{PhysicalAddressStatus::Available, 0x1000});
+  CHECK(apply_physical_address_cache(observation, std::nullopt).status ==
+        PhysicalAddressStatus::Unavailable);
+
   auto partial = pa1000;
   partial.resize(kBlockSize);
   observation = observe_physical_address(
@@ -227,6 +238,12 @@ int main() {
   CHECK(!std::filesystem::exists(cache_path.string() + ".tmp"));
   { std::ofstream(cache_path) << "malformed\n"; }
   CHECK(!load_physical_address_cache(cache_path));
+  { std::ofstream(cache_path)
+        << "version=1\naddress=1000\ntopology=" << first_identity << '\n'; }
+  CHECK(!load_physical_address_cache(cache_path));
+  { std::ofstream(cache_path)
+        << "version=2\naddress=0000\ntopology=" << first_identity << '\n'; }
+  CHECK(!load_physical_address_cache(cache_path));
 
   LinuxPhysicalAddressResolver resolver(drm, cache_path);
   CHECK(resolver.resolve().status == PhysicalAddressStatus::Unavailable);
@@ -240,6 +257,12 @@ int main() {
   std::filesystem::create_directories(drm / "renderD129");
   { std::ofstream(drm / "version") << "drm 1.1.0\n"; }
   CHECK(resolver.resolve().status == PhysicalAddressStatus::Unavailable);
+  // An enumerated connector whose status cannot be read/classified makes the
+  // inventory unknown; it must not collapse into all-disconnected fallback.
+  CHECK(WriteConnector(drm, "card0-HDMI-A-0", false, {}));
+  { std::ofstream(drm / "card0-HDMI-A-0" / "status") << "invalid\n"; }
+  CHECK(resolver.resolve().status == PhysicalAddressStatus::Unavailable);
+  std::filesystem::remove_all(drm / "card0-HDMI-A-0");
   CHECK(WriteConnector(drm, "card0-HDMI-A-1", true, pa1000));
   CHECK(resolver.resolve() ==
         PhysicalAddressResolution{PhysicalAddressStatus::Available, 0x1000});
@@ -254,7 +277,13 @@ int main() {
   std::filesystem::remove(drm / "card0-HDMI-A-1" / "edid");
   CHECK(resolver.resolve().status == PhysicalAddressStatus::Ambiguous);
   { std::ofstream(drm / "card1-HDMI-A-2" / "status") << "disconnected\n"; }
-  CHECK(resolver.resolve().status == PhysicalAddressStatus::Unavailable);
+  // A TV in standby can make every connector explicitly disconnected and
+  // hide all EDIDs. The last validated cache is then the only boot-time PA
+  // evidence; any connected, changed, unresolved, or ambiguous topology still
+  // follows the stricter checks above.
+  { std::ofstream(drm / "card0-HDMI-A-1" / "status") << "disconnected\n"; }
+  CHECK(resolver.resolve() ==
+        PhysicalAddressResolution{PhysicalAddressStatus::Available, 0x1000});
 
   const auto source_root = root / "drm-source";
   const auto source_cache = root / "state" / "source-physical-address";
