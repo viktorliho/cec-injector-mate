@@ -79,10 +79,21 @@ jobs:
           done < <(find packaging -type f -name '*.sh' -print | sort)
 
       - name: Verify systemd templates
+        shell: bash
         run: |
+          set -euo pipefail
+          units=$(mktemp -d)
+          trap 'rm -rf -- "$units"' EXIT
+          for name in cec-injector-mate.service cec-injector-mate-boot.service; do
+            sed \
+              -e 's|@EXECUTABLE@|/bin/true|g' \
+              -e 's|@DEVICE_ID@|linux-usb-serial-v1:544553542D43492D444556494345|g' \
+              -e 's|/opt/cec-injector-mate/current/libexec/readiness daemon 30|/bin/true|g' \
+              "packaging/linux/${name}.in" >"${units}/${name}"
+          done
           systemd-analyze verify \
-            packaging/linux/cec-injector-mate.service.in \
-            packaging/linux/cec-injector-mate-boot.service.in
+            "${units}/cec-injector-mate.service" \
+            "${units}/cec-injector-mate-boot.service"
 
   patched-libcec:
     name: Patched libCEC tests
