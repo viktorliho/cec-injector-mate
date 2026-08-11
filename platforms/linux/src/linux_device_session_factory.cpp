@@ -9,9 +9,11 @@ namespace cec_injector::mate::linux_platform {
 
 LinuxDeviceSessionFactory::LinuxDeviceSessionFactory(
     std::shared_ptr<LinuxDeviceInventory> inventory,
-    std::chrono::milliseconds operation_timeout)
+    std::chrono::milliseconds operation_timeout,
+    std::function<void(std::string_view)> diagnostics)
     : inventory_(std::move(inventory)),
-      operation_timeout_(operation_timeout) {
+      operation_timeout_(operation_timeout),
+      diagnostics_(std::move(diagnostics)) {
   if (!inventory_ || operation_timeout_ <= std::chrono::milliseconds::zero()) {
     throw std::invalid_argument("invalid Linux session factory configuration");
   }
@@ -28,7 +30,7 @@ std::unique_ptr<DeviceSession> LinuxDeviceSessionFactory::create_session(
   return std::make_unique<libcec::LibCecDeviceSession>(
       device.id, configuration,
       libcec::LibCecSessionOptions{current->explicit_port.string(),
-                                   operation_timeout_});
+                                   operation_timeout_, diagnostics_});
 }
 
 }  // namespace cec_injector::mate::linux_platform

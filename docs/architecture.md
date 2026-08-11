@@ -54,6 +54,40 @@ tagged with the active session generation; replacement or loss invalidates old
 work without preventing completion of a host transition hold. Runtime process
 startup is passive and does not imply `BootRequested`.
 
+Inbound CEC commands retain the single-reader boundary:
+
+```
+TV -> libCEC commandReceived callback
+   -> RealLibCecApi copies the complete command into PortableCecFrame
+   -> LibCecDeviceSession bounded callback-escape FIFO
+   -> DeviceSessionObserver copies bytes and receive-time session generation
+   -> serialized MateService task queue
+   -> portable validation and semantic translation
+   -> ExternalTvStandby -> Core policy -> RequestHostSuspend
+```
+
+The adapter FIFO is bounded at 32 events. Ordinary traffic is rejected with a
+diagnostic when full. A valid TV broadcast Standby may evict one queued
+ordinary frame; it is itself rejected and diagnosed if the queue contains only
+connection-loss or Standby events. The serialized Service queue is unbounded
+and consequently has no queue-full state.
+
+Generation validity is captured when the callback is received and preserved by
+FIFO ordering. A current-generation Standby queued immediately before
+SessionLost is therefore handled before the loss. An observer is disabled on
+replacement, and any already queued task whose device/generation no longer
+matches the active session is rejected as `stale_generation`. This keeps stale
+reconnect work from suspending the host without retroactively invalidating a
+frame already accepted from the current session.
+
+The R15 investigation found and corrected two independently valid silent-loss
+defects: full-FIFO loss of a Standby behind ordinary traffic, and retroactive
+generation invalidation after receipt. Four real SteamOS Standby cycles then
+completed adapter enqueue, Service acceptance, semantic translation,
+`RequestHostSuspend`, and actual suspend end to end. None showed queue pressure
+or a generation race near Standby. The historical R14 failure was not
+reproduced, so neither corrected defect is claimed as its proven cause.
+
 Discovery and session models support zero to many Devices. Initial product
 policy permits at most one selected active Device; ambiguous selection fails
 closed.

@@ -1,9 +1,12 @@
 #include "cec_injector/mate/libcec/libcec_device_session.h"
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <deque>
 #include <future>
+#include <iomanip>
 #include <mutex>
+#include <sstream>
 #include <thread>
 #include "wake_extension_client.h"
 namespace cec_injector::mate::libcec {
@@ -29,7 +32,16 @@ class LibCecDeviceSession::Impl {
     if(stopping&&tasks.empty()&&events.empty())break;if(!events.empty()){e=std::move(events.front());events.pop_front();}else{t=std::move(tasks.front());tasks.pop_front();}}
     if(e){dispatch(*e);}else t();}}
   struct Event{bool lost{};PortableCecFrame frame;};
-  void enqueue(Event e){std::lock_guard l(mu);if(events.size()<32||e.lost){if(e.lost&&events.size()>=32)events.pop_front();events.push_back(std::move(e));cv.notify_one();}}
+  static bool is_standby(const Event& e){return !e.lost&&e.frame.initiator==0&&e.frame.destination==0x0f&&e.frame.opcode&&*e.frame.opcode==0x36&&e.frame.parameters.empty();}
+  std::string frame_context(const PortableCecFrame& f)const{std::ostringstream out;out<<"source="<<std::hex<<static_cast<unsigned>(f.initiator)<<" destination="<<static_cast<unsigned>(f.destination)<<" opcode=";
+    if(f.opcode)out<<std::setw(2)<<std::setfill('0')<<static_cast<unsigned>(*f.opcode);else out<<"none";out<<std::dec<<" parameter_count="<<f.parameters.size();return out.str();}
+  void log(std::string message)const{if(options.diagnostics)options.diagnostics(message);}
+  void enqueue(Event e){std::lock_guard l(mu);const bool standby=is_standby(e);if(stopping){if(!e.lost)log("cec_rx dropped reason=session_closing "+frame_context(e.frame));return;}if(events.size()>=32){
+      if(e.lost){auto ordinary=std::find_if(events.begin(),events.end(),[](const Event& queued){return !queued.lost&&!is_standby(queued);});if(ordinary!=events.end()){events.erase(ordinary);log("cec_rx dropped reason=queue_full evicted=ordinary_for_session_lost");}else{const bool displaced_standby=is_standby(events.front());events.pop_front();log(std::string("cec_rx dropped reason=queue_full evicted=")+(displaced_standby?"external_tv_standby_for_session_lost":"session_lost_for_session_lost"));}}
+      else if(standby){auto ordinary=std::find_if(events.begin(),events.end(),[](const Event& queued){return !queued.lost&&!is_standby(queued);});
+        if(ordinary==events.end()){log("cec_rx dropped reason=queue_full semantic=external_tv_standby "+frame_context(e.frame));return;}events.erase(ordinary);log("cec_rx dropped reason=queue_full evicted=ordinary_for_external_tv_standby");}
+      else{log("cec_rx dropped reason=queue_full "+frame_context(e.frame));return;}}
+    if(standby)log("cec_rx enqueue semantic=external_tv_standby "+frame_context(e.frame));events.push_back(std::move(e));cv.notify_one();}
   void dispatch(const Event& e){if(e.lost){set_state(SessionState::Disconnected);return;}std::vector<std::uint8_t> bytes;
     bytes.push_back(static_cast<std::uint8_t>(e.frame.initiator<<4|e.frame.destination));if(e.frame.opcode)bytes.push_back(*e.frame.opcode);
     bytes.insert(bytes.end(),e.frame.parameters.begin(),e.frame.parameters.end());DeviceSessionObserver* o;{std::lock_guard l(state_mu);o=observer;}if(o)o->on_external_cec_frame(id,bytes);}

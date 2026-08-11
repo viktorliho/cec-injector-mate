@@ -7,7 +7,8 @@
 #include "cec_injector/mate/libcec/libcec_api.h"
 namespace cec_injector::mate::libcec {
 struct LibCecSessionOptions { std::string explicit_port;
-  std::chrono::milliseconds operation_timeout{2500}; };
+  std::chrono::milliseconds operation_timeout{2500};
+  std::function<void(std::string_view)> diagnostics; };
 class LibCecDeviceSession final : public DeviceSession {
  public:
   LibCecDeviceSession(DeviceId, DeviceSessionConfiguration,

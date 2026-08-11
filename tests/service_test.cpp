@@ -17,6 +17,9 @@ using namespace cec_injector::mate;
 
 namespace {
 
+bool HasDiagnostic(const std::vector<std::string>& diagnostics,
+                   std::string_view needle);
+
 struct SessionRecord {
   DeviceId id;
   DeviceSessionObserver* observer{};
@@ -364,6 +367,52 @@ void TestInputStandbyAndLifecycle() {
   service.shutdown();
   REQUIRE(record->disconnects == 1);
   REQUIRE(host.resets > 0);
+}
+
+void TestStandbyReceiveTimeGenerationOrdering() {
+  FakeHost host;
+  FakeFactory factory;
+  host.inventory = {Device("a", "opaque-a")};
+  MateServiceConfiguration configuration;
+  configuration.policy.suspend_on_tv_standby = true;
+  std::vector<std::string> diagnostics;
+  MateService service(host, factory, configuration,
+                      [&](std::string_view value) {
+                        diagnostics.emplace_back(value);
+                      });
+  REQUIRE(service.start() == OperationResult::Success);
+  service.wait_idle();
+  const auto current = factory.records.back();
+
+  current->frame({0x1f, 0x36});
+  current->frame({0x00, 0x36});
+  current->frame({0x0f, 0x36, 0x00});
+  service.wait_idle();
+  REQUIRE(host.suspends == 0);
+  REQUIRE(HasDiagnostic(diagnostics, "reason=wrong_initiator"));
+  REQUIRE(HasDiagnostic(diagnostics, "reason=wrong_destination"));
+  REQUIRE(HasDiagnostic(diagnostics, "reason=malformed_frame"));
+
+  // The callback accepted this frame while generation 1 was current. A
+  // following connection-loss callback must not retroactively invalidate it.
+  current->frame({0x0f, 0x36});
+  current->change_state(SessionState::Disconnected);
+  // This callback arrived only after loss had invalidated generation 1.
+  current->frame({0x0f, 0x36});
+  service.wait_idle();
+  REQUIRE(host.suspends == 1);
+  REQUIRE(HasDiagnostic(diagnostics,
+                        "cec_rx semantic=external_tv_standby"));
+  REQUIRE(HasDiagnostic(diagnostics, "reason=stale_generation"));
+
+  REQUIRE(factory.records.size() == 2);
+  // The old observer has been disabled during replacement. A late callback
+  // from it cannot synthesize another suspend.
+  REQUIRE(current->observer == nullptr);
+  current->frame({0x0f, 0x36});
+  service.wait_idle();
+  REQUIRE(host.suspends == 1);
+  service.shutdown();
 }
 
 void TestGenerationAndBoot() {
@@ -892,6 +941,7 @@ void TestDiagnosticSignalAndDiscoveryThrottling() {
 int main() {
   TestDiscoveryAndPa();
   TestInputStandbyAndLifecycle();
+  TestStandbyReceiveTimeGenerationOrdering();
   TestGenerationAndBoot();
   TestBootWaitsForSelectionAndPaWithoutSessionMaintenance();
   TestWakeFailureStillCompletesTransition();

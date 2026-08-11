@@ -109,11 +109,13 @@ int main(int argc, char** argv) {
 
   try {
     LinuxHostPlatform host(std::move(host_configuration));
-    LinuxDeviceSessionFactory factory(host.inventory());
+    const auto diagnostics = [](std::string_view message) {
+      std::cerr << "cec-injector-mate: " << message << '\n';
+    };
+    LinuxDeviceSessionFactory factory(
+        host.inventory(), std::chrono::milliseconds(2500), diagnostics);
     MateService service(host, factory, std::move(service_configuration),
-                        [](std::string_view message) {
-                          std::cerr << "cec-injector-mate: " << message << '\n';
-                        });
+                        diagnostics);
     if (service.start() != OperationResult::Success) return 1;
     if (boot_once) {
       const auto deadline = std::chrono::steady_clock::now() + startup_timeout;

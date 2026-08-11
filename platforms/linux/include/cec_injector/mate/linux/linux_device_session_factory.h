@@ -1,7 +1,9 @@
 #pragma once
 
 #include <chrono>
+#include <functional>
 #include <memory>
+#include <string_view>
 
 #include "cec_injector/mate/device_session_factory.h"
 #include "cec_injector/mate/linux/linux_host_platform.h"
@@ -13,7 +15,8 @@ class LinuxDeviceSessionFactory final : public DeviceSessionFactory {
   explicit LinuxDeviceSessionFactory(
       std::shared_ptr<LinuxDeviceInventory> inventory,
       std::chrono::milliseconds operation_timeout =
-          std::chrono::milliseconds(2500));
+          std::chrono::milliseconds(2500),
+      std::function<void(std::string_view)> diagnostics = {});
 
   [[nodiscard]] std::unique_ptr<DeviceSession> create_session(
       const DiscoveredDevice& device,
@@ -22,6 +25,7 @@ class LinuxDeviceSessionFactory final : public DeviceSessionFactory {
  private:
   std::shared_ptr<LinuxDeviceInventory> inventory_;
   std::chrono::milliseconds operation_timeout_;
+  std::function<void(std::string_view)> diagnostics_;
 };
 
 }  // namespace cec_injector::mate::linux_platform

@@ -4,7 +4,9 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <iomanip>
 #include <mutex>
+#include <sstream>
 #include <span>
 #include <string>
 #include <thread>
@@ -145,6 +147,7 @@ struct MateService::Impl {
     std::uint64_t generation{};
     DeviceId device;
     SessionState session_state{SessionState::Disconnected};
+    bool received_from_current_session{};
     std::vector<std::uint8_t> frame;
     WakeState wake;
     std::optional<HostLifecycleNotification> host;
@@ -183,6 +186,8 @@ struct MateService::Impl {
                                std::span<const std::uint8_t> frame) override {
       if (!enabled_) return;
       Task task{TaskKind::Frame, generation_, device};
+      task.received_from_current_session =
+          owner_.generation.load() == generation_;
       task.frame.assign(frame.begin(), frame.end());
       owner_.post(std::move(task));
     }
@@ -238,6 +243,11 @@ struct MateService::Impl {
   void post(Task task) {
     std::lock_guard lock(mutex);
     if (stopping) {
+      if (task.kind == TaskKind::Frame) {
+        log("cec_rx dropped reason=session_closing device=" +
+            std::string(task.device.diagnostic_value()) + " generation=" +
+            std::to_string(task.generation));
+      }
       if (task.host && task.host->transition_hold) {
         task.host->transition_hold->complete();
       }
@@ -502,17 +512,68 @@ struct MateService::Impl {
   }
 
   void handle_frame(const Task& task) {
-    if (!session || !active_device_id || task.device != *active_device_id ||
-        task.generation != active_generation ||
-        generation.load() != task.generation || task.frame.size() < 2) {
+    const auto frame_context = [&task] {
+      if (task.frame.empty()) return std::string("source=unknown destination=unknown opcode=none parameter_count=unknown");
+      const auto header = task.frame[0];
+      std::ostringstream out;
+      out << std::hex << "source=" << static_cast<unsigned>(header >> 4)
+          << " destination=" << static_cast<unsigned>(header & 0x0f)
+          << " opcode=";
+      if (task.frame.size() >= 2) {
+        out << std::setw(2) << std::setfill('0')
+            << static_cast<unsigned>(task.frame[1]);
+      } else {
+        out << "none";
+      }
+      out << std::dec << " parameter_count="
+          << (task.frame.size() >= 2 ? task.frame.size() - 2 : 0);
+      return out.str();
+    };
+    const auto drop = [this, &task, &frame_context](std::string_view reason) {
+      log("cec_rx dropped reason=" + std::string(reason) + " " +
+          frame_context() + " device=" +
+          std::string(task.device.diagnostic_value()) + " generation=" +
+          std::to_string(task.generation));
+    };
+    if (!session || !active_device_id) {
+      drop("no_active_session");
+      return;
+    }
+    if (!task.received_from_current_session ||
+        task.device != *active_device_id ||
+        task.generation != active_generation) {
+      drop("stale_generation");
+      return;
+    }
+    if (task.frame.size() < 2) {
+      drop("malformed_frame");
       return;
     }
     const auto header = task.frame[0];
     const auto initiator = static_cast<std::uint8_t>(header >> 4);
     const auto destination = static_cast<std::uint8_t>(header & 0x0f);
     const auto opcode = task.frame[1];
-    if (initiator == 0 && destination == 0x0f && opcode == 0x36 &&
-        task.frame.size() == 2) {
+    if (opcode == 0x36) {
+      if (initiator != 0) {
+        drop("wrong_initiator");
+        return;
+      }
+      if (destination != 0x0f) {
+        drop("wrong_destination");
+        return;
+      }
+      if (task.frame.size() != 2) {
+        drop("malformed_frame");
+        return;
+      }
+      log("cec_rx accepted " + frame_context() + " device=" +
+          std::string(task.device.diagnostic_value()) + " selection=" +
+          std::to_string(selection_epoch) + " generation=" +
+          std::to_string(task.generation));
+      log("cec_rx semantic=external_tv_standby device=" +
+          std::string(task.device.diagnostic_value()) + " selection=" +
+          std::to_string(selection_epoch) + " generation=" +
+          std::to_string(task.generation));
       execute_event(LifecycleEvent::ExternalTvStandby, nullptr,
                     task.generation);
       return;
