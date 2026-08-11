@@ -1,0 +1,158 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    name: Portable tests
+    runs-on: ubuntu-latest
+    container: debian:12
+
+    steps:
+      - name: Install host dependencies
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends \
+            ca-certificates cmake g++ git make
+
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Configure
+        run: cmake --preset host-debug
+
+      - name: Build
+        run: cmake --build --preset host-debug
+
+      - name: Test
+        run: ctest --preset host-debug
+
+  linux:
+    name: Linux and packaging tests
+    runs-on: ubuntu-latest
+    container: debian:12
+
+    steps:
+      - name: Install Linux dependencies
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends \
+            ca-certificates cmake g++ git libdrm-dev libsystemd-dev \
+            libudev-dev make systemd
+
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Configure
+        run: |
+          cmake -S . -B build/ci-linux \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTING=ON \
+            -DCEC_INJECTOR_MATE_BUILD_LINUX=ON
+
+      - name: Build
+        run: cmake --build build/ci-linux --parallel
+
+      - name: Test Linux, packaging, diagnostics, and boundaries
+        run: ctest --test-dir build/ci-linux --output-on-failure
+
+      - name: Check shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r script; do
+            case "$(head -n 1 "$script")" in
+              *bash*) bash -n "$script" ;;
+              *) sh -n "$script" ;;
+            esac
+          done < <(find packaging -type f -name '*.sh' -print | sort)
+
+      - name: Verify systemd templates
+        run: |
+          systemd-analyze verify \
+            packaging/linux/cec-injector-mate.service.in \
+            packaging/linux/cec-injector-mate-boot.service.in
+
+  patched-libcec:
+    name: Patched libCEC tests
+    runs-on: ubuntu-latest
+    container: debian:12
+    env:
+      LIBCEC_COMMIT: 3519af0715e654c43382423d843ad658f2e01cb4
+      P8_PLATFORM_COMMIT: 2748be52ae27e6007ef548b697d4a03ff7de4291
+      LIBCEC_PATCH_SHA256: 151e75f3d81578f90aca3bc343259eed381cc5e1a3f92c302c59fee12bb1980c
+
+    steps:
+      - name: Install production adapter dependencies
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends \
+            binutils build-essential ca-certificates cmake git libdrm-dev \
+            libsystemd-dev libudev-dev libx11-dev libxrandr-dev pkg-config
+
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Fetch pinned public dependencies
+        run: |
+          git clone https://github.com/Pulse-Eight/libcec.git /tmp/libcec
+          git -C /tmp/libcec checkout --detach "${LIBCEC_COMMIT}"
+          test "$(git -C /tmp/libcec rev-parse HEAD)" = "${LIBCEC_COMMIT}"
+          rm -rf /tmp/libcec/src/platform
+          git clone https://github.com/Pulse-Eight/platform.git /tmp/libcec/src/platform
+          git -C /tmp/libcec/src/platform checkout --detach "${P8_PLATFORM_COMMIT}"
+          test "$(git -C /tmp/libcec/src/platform rev-parse HEAD)" = \
+            "${P8_PLATFORM_COMMIT}"
+
+      - name: Verify and apply maintained libCEC patch
+        run: |
+          echo "${LIBCEC_PATCH_SHA256}  third_party/libcec/libcec-7.1.1-project-adapter-v1.patch" \
+            | sha256sum --check
+          git -C /tmp/libcec apply \
+            "${GITHUB_WORKSPACE}/third_party/libcec/libcec-7.1.1-project-adapter-v1.patch"
+
+      - name: Build pinned p8-platform and libCEC
+        run: |
+          cmake -S /tmp/libcec/src/platform -B /tmp/p8-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/tmp/cec-prefix \
+            -DBUILD_SHARED_LIBS=ON
+          cmake --build /tmp/p8-build --parallel
+          cmake --install /tmp/p8-build
+          PKG_CONFIG_PATH=/tmp/cec-prefix/lib/pkgconfig \
+            cmake -S /tmp/libcec -B /tmp/libcec-build \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX=/tmp/cec-prefix \
+              -DBUILD_SHARED_LIBS=ON
+          cmake --build /tmp/libcec-build --parallel
+          cmake --install /tmp/libcec-build
+          nm -D /tmp/cec-prefix/lib/libcec.so.7 \
+            | grep ' cec_project_adapter_transaction_v1$'
+
+      - name: Configure Mate against patched libCEC
+        run: |
+          PKG_CONFIG_PATH=/tmp/cec-prefix/lib/pkgconfig \
+            cmake -S . -B build/ci-patched-libcec \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DBUILD_TESTING=ON \
+              -DCEC_INJECTOR_MATE_BUILD_LINUX=ON \
+              -DCEC_INJECTOR_MATE_BUILD_LIBCEC=ON
+
+      - name: Build Mate
+        run: cmake --build build/ci-patched-libcec --parallel
+
+      - name: Run full tests
+        run: |
+          LD_LIBRARY_PATH=/tmp/cec-prefix/lib \
+            ctest --test-dir build/ci-patched-libcec --output-on-failure
