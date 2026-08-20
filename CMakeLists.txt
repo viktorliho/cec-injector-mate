@@ -16,7 +16,9 @@ option(CEC_INJECTOR_MATE_BUILD_LINUX
 add_subdirectory(mate-core)
 add_subdirectory(service)
 add_subdirectory(adapters/libcec)
-add_subdirectory(platforms/linux)
+if(CEC_INJECTOR_MATE_BUILD_LINUX)
+    add_subdirectory(platforms/linux)
+endif()
 
 if(CEC_INJECTOR_MATE_BUILD_LINUX AND CEC_INJECTOR_MATE_BUILD_LIBCEC)
     add_executable(cec-injector-mate service/src/linux_main.cpp)
