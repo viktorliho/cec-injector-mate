@@ -12,12 +12,17 @@ option(CEC_INJECTOR_MATE_BUILD_LIBCEC
        "Build the production adapter for the required patched libCEC ABI" OFF)
 option(CEC_INJECTOR_MATE_BUILD_LINUX
        "Build Linux platform implementations requiring host dependencies" OFF)
+option(CEC_INJECTOR_MATE_BUILD_MACOS
+       "Build macOS platform implementations requiring Apple frameworks" OFF)
 
 add_subdirectory(mate-core)
 add_subdirectory(service)
 add_subdirectory(adapters/libcec)
 if(CEC_INJECTOR_MATE_BUILD_LINUX)
     add_subdirectory(platforms/linux)
+endif()
+if(CEC_INJECTOR_MATE_BUILD_MACOS)
+    add_subdirectory(platforms/macos)
 endif()
 
 if(CEC_INJECTOR_MATE_BUILD_LINUX AND CEC_INJECTOR_MATE_BUILD_LIBCEC)
