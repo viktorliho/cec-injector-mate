@@ -3,13 +3,22 @@ set -eu
 
 root=${CEC_MATE_ROOT:-}
 purge_state=false
-test "${1:-}" != "--purge-state" || { purge_state=true; shift; }
-test "$#" -eq 0 || { echo "usage: uninstall.sh [--purge-state]" >&2; exit 2; }
+desktop_user=${CEC_MATE_DESKTOP_USER:-}
+while test "$#" -gt 0; do
+  case "$1" in
+    --purge-state) purge_state=true; shift;;
+    --desktop-user)
+      test "$#" -ge 2 || { echo "--desktop-user requires USER" >&2; exit 2; }
+      desktop_user=$2; shift 2;;
+    *) echo "usage: uninstall.sh [--desktop-user USER] [--purge-state]" >&2; exit 2;;
+  esac
+done
 if test -z "$root"; then
   test "$(id -u)" -eq 0 || { echo "uninstall requires root" >&2; exit 1; }
   systemctl disable --now cec-injector-mate.service cec-injector-mate-boot.service 2>/dev/null || true
   if test -r /etc/cec-injector-mate/installation.conf; then
     . /etc/cec-injector-mate/installation.conf
+    desktop_user=${desktop_user:-${CEC_MATE_DESKTOP_USER:-}}
     for device in /sys/bus/usb/devices/*; do
       test -f "$device/idVendor" && test -f "$device/idProduct" && test -f "$device/serial" || continue
       test "$(cat "$device/idVendor")" = "$CEC_MATE_VENDOR" || continue
@@ -28,9 +37,20 @@ rm -f -- \
   "${root}/etc/udev/rules.d/80-cec-injector-mate-device.rules" \
   "${root}/etc/udev/rules.d/80-cec-injector-mate-platform.rules" \
   "${root}/etc/udev/rules.d/71-cec-injector-mate-wakeup.rules" \
-  "${root}/etc/polkit-1/rules.d/49-cec-injector-mate-suspend.rules"
+  "${root}/etc/polkit-1/rules.d/49-cec-injector-mate-suspend.rules" \
+  "${root}/etc/dbus-1/system.d/org.cecinjector.Mate.conf"
+desktop_home=${CEC_MATE_DESKTOP_HOME:-}
+if test -z "$desktop_home" && test -n "$desktop_user"; then
+  desktop_home=$(getent passwd "$desktop_user" | cut -d: -f6)
+fi
+if test -n "$desktop_home"; then
+  rm -f -- "$desktop_home/.local/share/applications/cec-injector-mate.desktop"
+fi
 rm -rf -- "${root}/opt/cec-injector-mate"
-if $purge_state; then rm -rf -- "${root}/var/lib/cec-injector-mate"; fi
+if $purge_state; then
+  rm -rf -- "${root}/var/lib/cec-injector-mate" \
+    "${root}/etc/cec-injector-mate/runtime"
+fi
 
 if test -n "$root"; then
   echo "staged integration removed; configuration and state preserved"
@@ -38,6 +58,8 @@ if test -n "$root"; then
 fi
 
 systemctl daemon-reload
+busctl call org.freedesktop.DBus /org/freedesktop/DBus \
+  org.freedesktop.DBus ReloadConfig
 udevadm control --reload-rules
 udevadm trigger --subsystem-match=tty --action=change
 udevadm trigger --subsystem-match=misc --sysname-match=uinput --action=change

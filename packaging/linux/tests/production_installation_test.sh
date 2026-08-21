@@ -9,7 +9,8 @@ bundle=$fixture/bundle
 root=$fixture/root
 mkdir -p "$bundle/bin" "$bundle/lib" "$root"
 printf '#!/bin/sh\nexit 0\n' >"$bundle/bin/cec-injector-mate"
-chmod 0755 "$bundle/bin/cec-injector-mate"
+printf '#!/bin/sh\nexit 0\n' >"$bundle/bin/cec-injector-mate-gui"
+chmod 0755 "$bundle/bin/cec-injector-mate" "$bundle/bin/cec-injector-mate-gui"
 printf 'Mate commit: 0123456789abcdef0123456789abcdef01234567\n' >"$bundle/MANIFEST.txt"
 
 serial=TEST-PRODUCTION-SERIAL
@@ -18,10 +19,13 @@ mkdir -p "$root/etc/udev/rules.d" "$root/etc/cec-injector-mate" "$root/var/lib/c
 printf 'obsolete ACL rule\n' >"$root/etc/udev/rules.d/70-cec-injector-mate-device.rules"
 printf 'obsolete ACL rule\n' >"$root/etc/udev/rules.d/70-cec-injector-mate-platform.rules"
 printf 'CEC_MATE_SERIAL=OLD-PARTIAL-SERIAL\n' >"$root/etc/cec-injector-mate/installation.conf"
-CEC_MATE_ROOT=$root "$packaging/install.sh" "$bundle" CAFE CEC1 "$serial"
+desktop_home=$root/home/deck
+CEC_MATE_ROOT=$root CEC_MATE_DESKTOP_HOME=$desktop_home \
+  "$packaging/install.sh" --desktop-user deck "$bundle" CAFE CEC1 "$serial"
 snapshot_a=$fixture/a
 find "$root" -type f -print0 | sort -z | xargs -0 sha256sum >"$snapshot_a"
-CEC_MATE_ROOT=$root "$packaging/install.sh" "$bundle" cafe cec1 "$serial"
+CEC_MATE_ROOT=$root CEC_MATE_DESKTOP_HOME=$desktop_home \
+  "$packaging/install.sh" --desktop-user deck "$bundle" cafe cec1 "$serial"
 find "$root" -type f -print0 | sort -z | xargs -0 sha256sum >"$fixture/b"
 cmp "$snapshot_a" "$fixture/b"
 
@@ -34,6 +38,22 @@ boot=$root/etc/systemd/system/cec-injector-mate-boot.service
 health=$root/opt/cec-injector-mate/current/libexec/health-check
 diagnostics=$root/opt/cec-injector-mate/current/libexec/diagnostics
 readiness=$root/opt/cec-injector-mate/current/libexec/readiness
+frontend_health=$root/opt/cec-injector-mate/current/libexec/frontend-health
+dbus_policy=$root/etc/dbus-1/system.d/org.cecinjector.Mate.conf
+launcher=$desktop_home/.local/share/applications/cec-injector-mate.desktop
+test -x "$root/opt/cec-injector-mate/current/bin/cec-injector-mate-gui"
+test -x "$frontend_health"
+grep -Fq 'GetStatus' "$frontend_health"
+grep -Fq 'GetConfiguration' "$frontend_health"
+test -f "$dbus_policy"
+grep -Fq 'send_member="SetConfiguration"' "$dbus_policy"
+grep -Fq 'group="wheel"' "$dbus_policy"
+test -f "$launcher"
+grep -Fq 'Exec=/opt/cec-injector-mate/current/bin/cec-injector-mate-gui' "$launcher"
+grep -Fq 'CEC_MATE_DESKTOP_USER=deck' \
+  "$root/etc/cec-injector-mate/installation.conf"
+grep -Fq 'Qt 6.4-compatible runtime is unavailable' "$packaging/install.sh"
+grep -Fq '<includedir>/etc/dbus-1/system.d</includedir>' "$packaging/install.sh"
 
 test "$(basename "$device_rule")" = 80-cec-injector-mate-device.rules
 test "$(basename "$platform_rule")" = 80-cec-injector-mate-platform.rules
@@ -106,8 +126,16 @@ grep -Fq 'TimeoutStartSec=45s' "$service"
 ! grep -Fq 'ExecStartPre=' "$boot"
 ! grep -Fq -- '--uinput' "$boot"
 ! grep -Fq -- '--remote-profile' "$boot"
-grep -Fq -- '--power-on-boot' "$boot"
+! grep -Fq -- '--power-on-boot' "$boot"
 ! grep -Fq -- '--power-on-resume' "$boot"
+grep -Fq -- '--runtime-config /etc/cec-injector-mate/runtime/config.conf' "$boot"
+grep -Fq -- '--runtime-config /etc/cec-injector-mate/runtime/config.conf' "$service"
+runtime_config="$root/etc/cec-injector-mate/runtime/config.conf"
+test -f "$runtime_config"
+test "$(stat -c %a "$runtime_config")" = 600
+grep -Fq 'version=1' "$runtime_config"
+grep -Fq 'power_on_boot=true' "$runtime_config"
+grep -Fq 'remote_profile=steamos-parity' "$runtime_config"
 ! find "$root" -path '*/usr/libexec/*' -print | grep -q .
 
 # The narrow staging seam proves the bug-bundle helper exits successfully and
@@ -172,17 +200,60 @@ fi
 grep -Fq 'readiness timeout profile=daemon resource=uinput' "$fixture/readiness-timeout.log"
 
 # Reinstalling for a new serial replaces, rather than accumulates, rules.
-CEC_MATE_ROOT=$root "$packaging/install.sh" "$bundle" cafe cec1 TEST-SECOND-SERIAL
+CEC_MATE_ROOT=$root CEC_MATE_DESKTOP_HOME=$desktop_home \
+  "$packaging/install.sh" --desktop-user deck "$bundle" cafe cec1 TEST-SECOND-SERIAL
 grep -Fq 'TEST-SECOND-SERIAL' "$device_rule"
 ! grep -Fq "$serial" "$device_rule"
 grep -Fq -- '--device-id linux-usb-serial-v1:544553542D5345434F4E442D53455249414C' "$service"
 
-CEC_MATE_ROOT=$root "$packaging/uninstall.sh"
+CEC_MATE_ROOT=$root CEC_MATE_DESKTOP_HOME=$desktop_home \
+  "$packaging/uninstall.sh" --desktop-user deck
 test ! -e "$service"
 test ! -e "$device_rule"
 test ! -e "$root/opt/cec-injector-mate"
 test -e "$root/etc/cec-injector-mate/installation.conf"
 test -e "$root/var/lib/cec-injector-mate"
+test -e "$root/etc/cec-injector-mate/runtime/config.conf"
+test ! -e "$dbus_policy"
+test ! -e "$launcher"
+
+# A previous CLI-based daily driver migrates every mutable policy bit before
+# its unit is replaced. Existing runtime configuration remains authoritative.
+migration_root=$fixture/migration-root
+mkdir -p "$migration_root/etc/systemd/system" "$migration_root/etc/cec-injector-mate"
+cat >"$migration_root/etc/systemd/system/cec-injector-mate.service" <<EOF
+[Service]
+ExecStart=/opt/cec-injector-mate/current/bin/cec-injector-mate --remote-profile steamos-parity --power-on-boot --standby-on-suspend --suspend-on-tv-standby
+EOF
+CEC_MATE_ROOT=$migration_root "$packaging/install.sh" "$bundle" cafe cec1 MIGRATION-SERIAL
+migrated=$migration_root/etc/cec-injector-mate/runtime/config.conf
+grep -Fq 'power_on_boot=true' "$migrated"
+grep -Fq 'power_on_resume=false' "$migrated"
+grep -Fq 'standby_on_suspend=true' "$migrated"
+grep -Fq 'standby_on_shutdown=false' "$migrated"
+grep -Fq 'suspend_on_tv_standby=true' "$migrated"
+grep -Fq 'wake_host_on_tv_source_request=false' "$migrated"
+grep -Fq 'remote_input_enabled=true' "$migrated"
+grep -Fq 'remote_profile=steamos-parity' "$migrated"
+
+# An unrecognizable legacy authority fails before replacing the working unit or
+# creating a new release/current link.
+invalid_root=$fixture/invalid-migration-root
+mkdir -p "$invalid_root/etc/systemd/system"
+cat >"$invalid_root/etc/systemd/system/cec-injector-mate.service" <<EOF
+[Service]
+ExecStart=/opt/cec-injector-mate/current/bin/cec-injector-mate --remote-profile private-profile --power-on-resume
+EOF
+cp "$invalid_root/etc/systemd/system/cec-injector-mate.service" \
+  "$fixture/invalid-service-before"
+if CEC_MATE_ROOT=$invalid_root "$packaging/install.sh" "$bundle" cafe cec1 INVALID-SERIAL; then
+  echo 'invalid legacy configuration unexpectedly migrated' >&2
+  exit 1
+fi
+cmp "$fixture/invalid-service-before" \
+  "$invalid_root/etc/systemd/system/cec-injector-mate.service"
+test ! -e "$invalid_root/opt/cec-injector-mate/current"
+test ! -e "$invalid_root/etc/cec-injector-mate/runtime/config.conf"
 
 current_serial=53032847289E399
 current_serial=${current_serial}C

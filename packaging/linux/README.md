@@ -19,7 +19,7 @@ The serial is deployment input and is not stored in public source.
 
 ## Production-style installation candidate
 
-`install.sh BUNDLE VID PID SERIAL` installs a pinned public bundle and a
+`install.sh [--desktop-user USER] BUNDLE VID PID SERIAL` installs a pinned public bundle and a
 dedicated unprivileged `cec-injector-mate` account/group. Exact-device serial
 access and `/dev/uinput` use native udev ownership with mode `0600`;
 read-only DRM EDID queries use the ordinary primary-node `video` group without

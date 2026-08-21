@@ -105,7 +105,9 @@ jobs:
         run: |
           apt-get update
           apt-get install --yes --no-install-recommends \
-            ca-certificates cmake g++ git make qt6-base-dev qt6-base-dev-tools
+            ca-certificates cmake dbus-daemon g++ git libdrm-dev \
+            libsystemd-dev libudev-dev make pkg-config qt6-base-dev \
+            qt6-base-dev-tools
 
       - name: Check out source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -115,6 +117,7 @@ jobs:
           cmake -S . -B build/ci-gui \
             -DCMAKE_BUILD_TYPE=Debug \
             -DBUILD_TESTING=ON \
+            -DCEC_INJECTOR_MATE_BUILD_LINUX=ON \
             -DCEC_INJECTOR_MATE_BUILD_GUI=ON
 
       - name: Build GUI

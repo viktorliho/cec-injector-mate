@@ -21,6 +21,8 @@ test "$(git -C /libcec-upstream/src/platform rev-parse HEAD)" = "$p8_commit"
 echo "$patch_sha  /mate/third_party/libcec/libcec-7.1.1-project-adapter-v1.patch" | sha256sum -c -
 
 rm -rf /work /out/bundle
+rm -f /out/cec-injector-mate-bundle.tar.zst /out/SHA256SUMS \
+  /out/exported-symbol.txt
 mkdir -p /work /out/bundle/bin /out/bundle/lib
 git clone --quiet --no-hardlinks /libcec-upstream /work/libcec
 git -C /work/libcec reset --hard "$libcec_commit"
@@ -42,16 +44,21 @@ nm -D /work/prefix/lib/libcec.so.7 \
 
 PKG_CONFIG_PATH=/work/prefix/lib/pkgconfig cmake -S /mate -B /work/mate-build \
   -DCMAKE_BUILD_TYPE=Release -DCEC_INJECTOR_MATE_BUILD_LINUX=ON \
-  -DCEC_INJECTOR_MATE_BUILD_LIBCEC=ON
+  -DCEC_INJECTOR_MATE_BUILD_LIBCEC=ON \
+  -DCEC_INJECTOR_MATE_BUILD_GUI=ON
 cmake --build /work/mate-build --parallel
 LD_LIBRARY_PATH=/work/prefix/lib ctest --test-dir /work/mate-build --output-on-failure
 install -m 0755 /work/mate-build/cec-injector-mate /out/bundle/bin/
+install -m 0755 /work/mate-build/applications/gui/cec-injector-mate-gui \
+  /out/bundle/bin/
 install -m 0644 /work/prefix/lib/libcec.so.7 /out/bundle/lib/
 install -m 0644 /work/prefix/lib/libp8-platform.so.2 /out/bundle/lib/
 patchelf --set-rpath '$ORIGIN/../lib' /out/bundle/bin/cec-injector-mate
+patchelf --set-rpath '$ORIGIN/../lib' /out/bundle/bin/cec-injector-mate-gui
 patchelf --set-rpath '$ORIGIN' /out/bundle/lib/libcec.so.7
 
 exe_sha=$(sha256sum /out/bundle/bin/cec-injector-mate | cut -d' ' -f1)
+gui_sha=$(sha256sum /out/bundle/bin/cec-injector-mate-gui | cut -d' ' -f1)
 cec_sha=$(sha256sum /out/bundle/lib/libcec.so.7 | cut -d' ' -f1)
 p8_sha=$(sha256sum /out/bundle/lib/libp8-platform.so.2 | cut -d' ' -f1)
 cat >/out/bundle/MANIFEST.txt <<EOF
@@ -65,6 +72,9 @@ Build userspace: Debian 12.11
 Compiler: $(c++ --version | head -n1)
 CMake: $(cmake --version | head -n1)
 Executable SHA-256: $exe_sha
+GUI executable SHA-256: $gui_sha
+GUI Qt runtime strategy: SteamOS system Qt 6 (minimum symbol level Qt_6.4)
+GUI Qt platform plugins: system Wayland and XCB
 libcec.so.7 SHA-256: $cec_sha
 libp8-platform.so.2 SHA-256: $p8_sha
 Source date epoch: $source_epoch
@@ -74,5 +84,6 @@ tar --sort=name --mtime="@$source_epoch" --owner=0 --group=0 --numeric-owner \
   --format=posix --pax-option=delete=atime,delete=ctime -C /out -cf - bundle \
   | zstd -19 -T1 -o /out/cec-injector-mate-bundle.tar.zst
 sha256sum /out/cec-injector-mate-bundle.tar.zst /out/bundle/bin/cec-injector-mate \
+  /out/bundle/bin/cec-injector-mate-gui \
   /out/bundle/lib/libcec.so.7 /out/bundle/lib/libp8-platform.so.2 \
   /out/bundle/MANIFEST.txt >/out/SHA256SUMS

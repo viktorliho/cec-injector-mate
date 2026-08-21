@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=CEC Injector
+Comment=Configure and inspect CEC Injector Mate
+Exec=/opt/cec-injector-mate/current/bin/cec-injector-mate-gui
+Terminal=false
+Categories=Settings;HardwareSettings;
