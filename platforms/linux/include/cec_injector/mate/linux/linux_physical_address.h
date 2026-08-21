@@ -8,20 +8,15 @@
 #include <string>
 #include <vector>
 
+#include "cec_injector/mate/edid/physical_address.h"
 #include "cec_injector/mate/host_platform.h"
 
 namespace cec_injector::mate::linux_platform {
 
-enum class EdidPhysicalAddressStatus {
-  Invalid,
-  NoPhysicalAddress,
-  PhysicalAddress,
-};
-
-struct EdidPhysicalAddressResult {
-  EdidPhysicalAddressStatus status{EdidPhysicalAddressStatus::Invalid};
-  std::optional<std::uint16_t> address;
-};
+using edid::EdidPhysicalAddressResult;
+using edid::EdidPhysicalAddressStatus;
+using edid::parse_edid_physical_address;
+using edid::physical_address_valid_for_source;
 
 struct DrmConnectorObservation {
   std::string name;
@@ -48,9 +43,6 @@ struct PhysicalAddressCacheEntry {
 using DrmEdidReader = std::function<std::optional<std::vector<std::uint8_t>>(
     const std::filesystem::path& connector)>;
 
-[[nodiscard]] bool physical_address_valid_for_source(std::uint16_t address);
-[[nodiscard]] EdidPhysicalAddressResult parse_edid_physical_address(
-    std::span<const std::uint8_t> edid);
 [[nodiscard]] LinuxPhysicalAddressObservation observe_physical_address(
     const std::vector<DrmConnectorObservation>& connectors);
 [[nodiscard]] PhysicalAddressResolution apply_physical_address_cache(

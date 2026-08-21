@@ -16,6 +16,7 @@ option(CEC_INJECTOR_MATE_BUILD_MACOS
        "Build macOS platform implementations requiring Apple frameworks" OFF)
 
 add_subdirectory(mate-core)
+add_subdirectory(platform-support/edid)
 add_subdirectory(service)
 add_subdirectory(adapters/libcec)
 if(CEC_INJECTOR_MATE_BUILD_LINUX)

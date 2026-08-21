@@ -37,6 +37,7 @@ target_include_directories(cec_injector_mate_linux_physical_address
 target_link_libraries(cec_injector_mate_linux_physical_address
     PUBLIC
         CECInjector::MateCore
+        CECInjector::MateEdid
 )
 target_compile_features(cec_injector_mate_linux_physical_address PUBLIC cxx_std_20)
 if(MSVC)
