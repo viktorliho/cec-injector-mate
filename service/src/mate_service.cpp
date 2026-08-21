@@ -363,10 +363,13 @@ struct MateService::Impl {
       next.session_state = session->state();
       next.device_state = session->snapshot();
     }
+    bool changed = false;
     {
       std::lock_guard lock(mutex);
+      changed = frontend_snapshot != next;
       frontend_snapshot = next;
     }
+    if (!changed) return;
     std::lock_guard observer_lock(frontend_observer_mutex);
     if (frontend_observer) frontend_observer->on_service_snapshot(next);
   }

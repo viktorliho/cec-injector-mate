@@ -43,6 +43,7 @@ struct SessionRecord {
   OperationResult refresh_result{OperationResult::Success};
   OperationResult power_result{OperationResult::Success};
   OperationResult wake_configure_result{OperationResult::Success};
+  OperationResult wake_arm_result{OperationResult::Success};
   std::vector<std::string> operations;
 
   void frame(std::initializer_list<std::uint8_t> bytes) {
@@ -122,16 +123,24 @@ class FakeSession final : public DeviceSession {
       record_->state = SessionState::Disconnected;
       record_->observer->on_session_state_changed(record_->id, record_->state);
     }
+    if (record_->wake_configure_result == OperationResult::Success) {
+      record_->snapshot.wake.supported = true;
+      record_->snapshot.wake.configured = true;
+    }
     return record_->wake_configure_result;
   }
   OperationResult arm_wake() override {
     ++record_->wake_arms;
     record_->operations.push_back("wake-arm");
-    return OperationResult::Success;
+    if (record_->wake_arm_result == OperationResult::Success) {
+      record_->snapshot.wake.armed = true;
+    }
+    return record_->wake_arm_result;
   }
   OperationResult disarm_wake() override {
     ++record_->wake_disarms;
     record_->operations.push_back("wake-disarm");
+    record_->snapshot.wake.armed = false;
     return OperationResult::Success;
   }
   WakeReason read_last_wake_reason() override {
@@ -164,6 +173,10 @@ class FakeFactory final : public DeviceSessionFactory {
     record->refresh_result = next_refresh_result;
     record->power_result = next_power_result;
     record->lose_on_power = next_lose_on_power;
+    record->wake_configure_result = next_wake_configure_result;
+    record->wake_arm_result = next_wake_arm_result;
+    next_wake_configure_result = OperationResult::Success;
+    next_wake_arm_result = OperationResult::Success;
     records.push_back(record);
     return std::make_unique<FakeSession>(record);
   }
@@ -172,6 +185,8 @@ class FakeFactory final : public DeviceSessionFactory {
   bool fail{};
   OperationResult next_refresh_result{OperationResult::Success};
   OperationResult next_power_result{OperationResult::Success};
+  OperationResult next_wake_configure_result{OperationResult::Success};
+  OperationResult next_wake_arm_result{OperationResult::Success};
   bool next_lose_on_power{};
   std::vector<DeviceSessionConfiguration> configurations;
   std::vector<DiscoveredDevice> devices;
@@ -230,9 +245,65 @@ class FakeHost final : public HostPlatform {
   HostLifecycleObserver* observer{};
 };
 
+class SnapshotObserver final : public MateServiceFrontendObserver {
+ public:
+  void on_service_snapshot(const MateServiceSnapshot& value) override {
+    snapshots.push_back(value);
+  }
+  void on_service_cec_event(const MateServiceCecEvent&) override {}
+  void on_manual_action_completed(MateManualActionRequestId,
+                                  const MateManualActionResult&) override {}
+  std::vector<MateServiceSnapshot> snapshots;
+};
+
 DiscoveredDevice Device(std::string id, std::string locator) {
   return {DeviceId(std::move(id)), PlatformDeviceLocator(std::move(locator)),
           "test Device"};
+}
+
+void TestWakeSnapshotPublicationAfterReconnect() {
+  FakeHost host;
+  FakeFactory factory;
+  host.inventory = {Device("a", "opaque-a")};
+  MateServiceConfiguration configuration;
+  configuration.policy.wake_host_on_tv_source_request = true;
+  MateService service(host, factory, configuration);
+  REQUIRE(service.start() == OperationResult::Success);
+  service.wait_idle();
+  SnapshotObserver observer;
+  service.set_frontend_observer(&observer);
+  REQUIRE(service.frontend_snapshot().device_state.wake.configured);
+  REQUIRE(service.frontend_snapshot().device_state.wake.armed);
+
+  auto first = factory.records.back();
+  first->change_state(SessionState::Disconnected);
+  service.wait_idle();
+  REQUIRE(factory.records.size() == 2);
+  REQUIRE(service.frontend_snapshot().session_state == SessionState::Connected);
+  REQUIRE(service.frontend_snapshot().device_state.wake.configured);
+  REQUIRE(service.frontend_snapshot().device_state.wake.armed);
+  REQUIRE(!observer.snapshots.empty());
+  REQUIRE(observer.snapshots.back().device_state.wake.armed);
+
+  factory.next_wake_arm_result = OperationResult::InternalError;
+  factory.records.back()->change_state(SessionState::Disconnected);
+  service.wait_idle();
+  REQUIRE(factory.records.size() == 3);
+  REQUIRE(service.frontend_snapshot().session_state == SessionState::Connected);
+  REQUIRE(service.frontend_snapshot().device_state.wake.configured);
+  REQUIRE(!service.frontend_snapshot().device_state.wake.armed);
+
+  auto failed = factory.records.back();
+  failed->change_state(SessionState::Disconnected);
+  service.wait_idle();
+  REQUIRE(factory.records.size() == 4);
+  REQUIRE(service.frontend_snapshot().device_state.wake.armed);
+  REQUIRE(first->observer == nullptr);
+  first->snapshot.wake = {true, true, true, true};
+  REQUIRE(service.frontend_snapshot().session_generation != 1);
+  REQUIRE(service.frontend_snapshot().device_state.wake.armed);
+  service.set_frontend_observer(nullptr);
+  service.shutdown();
 }
 
 void TestDiscoveryAndPa() {
@@ -939,6 +1010,7 @@ void TestDiagnosticSignalAndDiscoveryThrottling() {
 }  // namespace
 
 int main() {
+  TestWakeSnapshotPublicationAfterReconnect();
   TestDiscoveryAndPa();
   TestInputStandbyAndLifecycle();
   TestStandbyReceiveTimeGenerationOrdering();
