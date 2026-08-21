@@ -44,6 +44,29 @@ target_compile_options(cec_injector_mate_macos_discovery PRIVATE
     -Wall -Wextra -Wpedantic
 )
 
+add_library(cec_injector_mate_macos_physical_address
+    src/mac_physical_address.cpp
+)
+add_library(CECInjector::MateMacPhysicalAddress ALIAS
+    cec_injector_mate_macos_physical_address
+)
+target_include_directories(cec_injector_mate_macos_physical_address
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(cec_injector_mate_macos_physical_address
+    PUBLIC
+        CECInjector::MateCore
+        CECInjector::MateEdid
+    PRIVATE
+        "-framework IOKit"
+        "-framework CoreFoundation"
+)
+target_compile_features(cec_injector_mate_macos_physical_address PUBLIC cxx_std_20)
+target_compile_options(cec_injector_mate_macos_physical_address PRIVATE
+    -Wall -Wextra -Wpedantic
+)
+
 add_library(cec_injector_mate_macos_session_factory
     src/mac_device_session_factory.cpp
 )
@@ -91,6 +114,20 @@ if(BUILD_TESTING)
     )
     add_test(NAME mate-macos-session-factory COMMAND
         mate-macos-session-factory-tests)
+
+    add_executable(mate-macos-physical-address-tests
+        tests/mac_physical_address_test.cpp
+    )
+    target_link_libraries(mate-macos-physical-address-tests PRIVATE
+        CECInjector::MateMacPhysicalAddress
+    )
+    target_compile_features(mate-macos-physical-address-tests PRIVATE cxx_std_20)
+    target_compile_options(mate-macos-physical-address-tests PRIVATE
+        -Wall -Wextra -Wpedantic
+    )
+    add_test(NAME mate-macos-physical-address COMMAND
+        mate-macos-physical-address-tests)
+
 endif()
 
 add_executable(cec-injector-mate-macos-discovery-probe
@@ -101,5 +138,16 @@ target_link_libraries(cec-injector-mate-macos-discovery-probe PRIVATE
 )
 target_compile_features(cec-injector-mate-macos-discovery-probe PRIVATE cxx_std_20)
 target_compile_options(cec-injector-mate-macos-discovery-probe PRIVATE
+    -Wall -Wextra -Wpedantic
+)
+
+add_executable(cec-injector-mate-macos-pa-probe
+    tests/mac_pa_probe.cpp
+)
+target_link_libraries(cec-injector-mate-macos-pa-probe PRIVATE
+    CECInjector::MateMacPhysicalAddress
+)
+target_compile_features(cec-injector-mate-macos-pa-probe PRIVATE cxx_std_20)
+target_compile_options(cec-injector-mate-macos-pa-probe PRIVATE
     -Wall -Wextra -Wpedantic
 )
