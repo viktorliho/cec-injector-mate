@@ -1,4 +1,5 @@
 add_library(cec_injector_mate_libcec_adapter
+    src/libcec_session_engine.cpp
     src/libcec_device_session.cpp
     src/wake_extension_client.cpp)
 add_library(CECInjector::LibCecAdapter ALIAS cec_injector_mate_libcec_adapter)
