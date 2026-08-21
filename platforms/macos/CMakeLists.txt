@@ -151,3 +151,16 @@ target_compile_features(cec-injector-mate-macos-pa-probe PRIVATE cxx_std_20)
 target_compile_options(cec-injector-mate-macos-pa-probe PRIVATE
     -Wall -Wextra -Wpedantic
 )
+
+add_executable(cec-injector-mate-macos-lab
+    tests/mac_lab_cli.cpp
+)
+target_link_libraries(cec-injector-mate-macos-lab PRIVATE
+    CECInjector::MateMacDiscovery
+    CECInjector::MateMacPhysicalAddress
+    CECInjector::MateMacSessionFactory
+)
+target_compile_features(cec-injector-mate-macos-lab PRIVATE cxx_std_20)
+target_compile_options(cec-injector-mate-macos-lab PRIVATE
+    -Wall -Wextra -Wpedantic
+)
