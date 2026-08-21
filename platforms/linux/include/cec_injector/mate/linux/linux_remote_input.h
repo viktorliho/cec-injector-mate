@@ -38,6 +38,7 @@ struct LinuxInputBinding {
 
 struct LinuxRemoteInputProfile {
   std::map<SemanticRemoteAction, LinuxInputBinding> bindings;
+  bool operator==(const LinuxRemoteInputProfile&) const = default;
 };
 
 [[nodiscard]] LinuxRemoteInputProfile steamos_parity_remote_input_profile();
@@ -91,6 +92,7 @@ class LinuxRemoteInputController {
                                      RemoteActionState state,
                                      Clock::time_point now = Clock::now());
   OperationResult reset_remote_input();
+  OperationResult reconfigure(bool enabled, LinuxRemoteInputProfile profile);
   OperationResult tick(Clock::time_point now = Clock::now());
 
   [[nodiscard]] std::optional<SemanticRemoteAction> active_action() const noexcept {
@@ -116,6 +118,7 @@ class LinuxRemoteInputController {
   LinuxRemoteInputProfile profile_;
   std::set<LinuxInputKey> capabilities_;
   bool device_created_{};
+  bool enabled_{true};
   std::optional<SemanticRemoteAction> active_action_;
   std::optional<LinuxInputBinding> active_binding_;
   Clock::time_point release_deadline_{};

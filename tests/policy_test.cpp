@@ -99,6 +99,18 @@ int main() {
   CHECK(safe_defaults.state() == LifecycleState::Running);
   CHECK(safe_defaults.handle(LifecycleEvent::BootRequested).steps.empty());
 
+  PolicyStateMachine reconfigured;
+  const auto accepted_before_update =
+      reconfigured.handle(LifecycleEvent::HostPreparingSuspend);
+  reconfigured.set_configuration(Enabled());
+  CHECK(Intents(accepted_before_update) ==
+        std::vector<PolicyIntent>({PolicyIntent::ResetRemoteInput,
+                                   PolicyIntent::CompleteHostTransition}));
+  CHECK(Intents(reconfigured.handle(LifecycleEvent::HostPreparingShutdown)) ==
+        std::vector<PolicyIntent>({PolicyIntent::ResetRemoteInput,
+                                   PolicyIntent::StandbyTv,
+                                   PolicyIntent::CompleteHostTransition}));
+
   PolicyStateMachine policy(Enabled());
   CHECK(Intents(policy.handle(LifecycleEvent::BootRequested)) ==
         std::vector<PolicyIntent>({PolicyIntent::PowerOnTv,

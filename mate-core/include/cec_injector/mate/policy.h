@@ -80,6 +80,11 @@ class PolicyStateMachine {
   [[nodiscard]] const PolicyConfiguration& configuration() const noexcept {
     return configuration_;
   }
+  // Existing plans are values and retain the snapshot used when their event
+  // was accepted. Reconfiguration therefore affects future plans only.
+  void set_configuration(PolicyConfiguration configuration) noexcept {
+    configuration_ = configuration;
+  }
 
  private:
   PolicyConfiguration configuration_;

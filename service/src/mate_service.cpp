@@ -4,6 +4,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <future>
 #include <iomanip>
 #include <mutex>
 #include <sstream>
@@ -138,6 +139,8 @@ struct MateService::Impl {
     Frame,
     Wake,
     Host,
+    Configuration,
+    ManualAction,
   };
   struct Task {
     explicit Task(TaskKind value) : kind(value) {}
@@ -151,6 +154,10 @@ struct MateService::Impl {
     std::vector<std::uint8_t> frame;
     WakeState wake;
     std::optional<HostLifecycleNotification> host;
+    std::optional<MateRuntimeConfiguration> configuration;
+    std::shared_ptr<std::promise<OperationResult>> configuration_result;
+    MateManualAction manual_action{MateManualAction::PowerOnTv};
+    MateManualActionRequestId manual_request{};
   };
 
   struct ResumeRecovery {
@@ -212,7 +219,12 @@ struct MateService::Impl {
         explicit_selection(std::move(configuration.selected_device)),
         resume_recovery_timeout(configuration.resume_recovery_timeout),
         maintain_session_wake(configuration.maintain_session_wake),
-        diagnostics(std::move(sink)) {}
+        runtime_configuration{configuration.policy, configuration.remote},
+        diagnostics(std::move(sink)) {
+    const auto epoch = static_cast<std::uint64_t>(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    next_manual_request.store((epoch & 0x7fffffffULL) << 32 | 1ULL);
+  }
 
   void log(std::string_view message) {
     if (diagnostics) diagnostics(message);
@@ -277,6 +289,7 @@ struct MateService::Impl {
         busy = true;
       }
       handle(std::move(task));
+      refresh_frontend_snapshot();
       {
         std::lock_guard lock(mutex);
         busy = false;
@@ -300,6 +313,110 @@ struct MateService::Impl {
         }
         break;
       case TaskKind::Host: handle_host(std::move(*task.host)); break;
+      case TaskKind::Configuration: {
+        MateRuntimeConfiguration previous;
+        {
+          std::lock_guard lock(mutex);
+          previous = runtime_configuration;
+        }
+        auto result = host.apply_remote_input_configuration(
+            task.configuration->remote);
+        if (result == OperationResult::Success ||
+            result == OperationResult::Unsupported) {
+          policy.set_configuration(task.configuration->policy);
+          {
+            std::lock_guard lock(mutex);
+            runtime_configuration = *task.configuration;
+          }
+          result = OperationResult::Success;
+        } else {
+          (void)host.apply_remote_input_configuration(previous.remote);
+        }
+        task.configuration_result->set_value(result);
+        break;
+      }
+      case TaskKind::ManualAction: execute_manual_action(task); break;
+    }
+  }
+
+  void notify_cec(const MateServiceCecEvent& event) {
+    std::lock_guard lock(frontend_observer_mutex);
+    if (frontend_observer) frontend_observer->on_service_cec_event(event);
+  }
+
+  void refresh_frontend_snapshot() {
+    MateServiceSnapshot next;
+    next.running = true;
+    next.device_count = inventory.size();
+    next.selected_device = registry.snapshot().selected_active;
+    if (next.selected_device) {
+      if (const auto* selected = find_device(*next.selected_device)) {
+        next.device_display_name = selected->display_name;
+      }
+    }
+    next.host_power_state = host.host_power_state();
+    next.display = host.display_summary();
+    next.session_generation = generation.load();
+    next.physical_address_status = last_physical_address_resolution.status;
+    next.physical_address = last_physical_address_resolution.address;
+    if (session) {
+      next.session_state = session->state();
+      next.device_state = session->snapshot();
+    }
+    {
+      std::lock_guard lock(mutex);
+      frontend_snapshot = next;
+    }
+    std::lock_guard observer_lock(frontend_observer_mutex);
+    if (frontend_observer) frontend_observer->on_service_snapshot(next);
+  }
+
+  void execute_manual_action(const Task& task) {
+    const auto started = Clock::now();
+    OperationResult result = OperationResult::Disconnected;
+    if (session) {
+      switch (task.manual_action) {
+        case MateManualAction::PowerOnTv: result = session->power_on_tv(); break;
+        case MateManualAction::MakeActiveSource:
+          result = session->make_active_source();
+          break;
+        case MateManualAction::StandbyTv: result = session->standby_tv(); break;
+      }
+    }
+    MateManualActionResult completed{
+        task.manual_action, result,
+        std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started),
+        {}};
+    if (session) {
+      MateServiceCecEvent event;
+      event.timestamp = std::chrono::system_clock::now();
+      event.received = false;
+      const auto snapshot = session->snapshot();
+      event.source = snapshot.addresses.logical.value_or(4);
+      event.destination = task.manual_action == MateManualAction::MakeActiveSource
+                              ? 15 : 0;
+      switch (task.manual_action) {
+      case MateManualAction::PowerOnTv:
+        event.opcode = 0x04;
+        event.semantic = "power_on_tv";
+        break;
+      case MateManualAction::MakeActiveSource:
+        event.opcode = 0x82;
+        event.parameters = {static_cast<std::uint8_t>(active_physical_address >> 8),
+                            static_cast<std::uint8_t>(active_physical_address)};
+        event.semantic = "make_active_source";
+        break;
+      case MateManualAction::StandbyTv:
+        event.opcode = 0x36;
+        event.semantic = "standby_tv";
+        break;
+      }
+      notify_cec(event);
+    }
+    std::lock_guard lock(frontend_observer_mutex);
+    if (frontend_observer) {
+      frontend_observer->on_manual_action_completed(task.manual_request,
+                                                    completed);
     }
   }
 
@@ -336,6 +453,7 @@ struct MateService::Impl {
       return;
     }
     const auto resolution = host.resolve_physical_address();
+    last_physical_address_resolution = resolution;
     if (resolution.status == PhysicalAddressStatus::Available &&
         resolution.address && *resolution.address != active_physical_address) {
       log("physical address changed; replacing session");
@@ -383,6 +501,7 @@ struct MateService::Impl {
       diagnostics(message);
     }
     const auto resolution = host.resolve_physical_address();
+    last_physical_address_resolution = resolution;
     if (resolution.status != PhysicalAddressStatus::Available ||
         !resolution.address) {
       log(resolution.status == PhysicalAddressStatus::Ambiguous
@@ -512,6 +631,17 @@ struct MateService::Impl {
   }
 
   void handle_frame(const Task& task) {
+    if (task.frame.size() >= 2) {
+      MateServiceCecEvent event;
+      event.timestamp = std::chrono::system_clock::now();
+      event.received = true;
+      event.source = task.frame[0] >> 4;
+      event.destination = task.frame[0] & 0x0f;
+      event.opcode = task.frame[1];
+      event.parameters.assign(task.frame.begin() + 2, task.frame.end());
+      if (event.opcode == 0x36) event.semantic = "external_tv_standby";
+      notify_cec(event);
+    }
     const auto frame_context = [&task] {
       if (task.frame.empty()) return std::string("source=unknown destination=unknown opcode=none parameter_count=unknown");
       const auto header = task.frame[0];
@@ -994,6 +1124,7 @@ struct MateService::Impl {
   std::optional<DeviceId> explicit_selection;
   const std::chrono::milliseconds resume_recovery_timeout;
   const bool maintain_session_wake;
+  MateRuntimeConfiguration runtime_configuration;
   DiagnosticSink diagnostics;
   std::vector<DiscoveredDevice> inventory;
   bool discovery_snapshot_logged{};
@@ -1004,6 +1135,7 @@ struct MateService::Impl {
   std::optional<SemanticRemoteAction> active_remote_action;
   WakeState last_wake_state;
   std::uint16_t active_physical_address{0xffff};
+  PhysicalAddressResolution last_physical_address_resolution;
   std::uint64_t active_generation{};
   std::uint64_t last_closed_generation{};
   std::uint64_t selection_epoch{};
@@ -1019,6 +1151,10 @@ struct MateService::Impl {
   bool stopping{};
   bool busy{};
   std::thread worker;
+  MateServiceSnapshot frontend_snapshot;
+  mutable std::mutex frontend_observer_mutex;
+  MateServiceFrontendObserver* frontend_observer{};
+  std::atomic<MateManualActionRequestId> next_manual_request{1};
 };
 
 MateService::MateService(HostPlatform& host, DeviceSessionFactory& factory,
@@ -1032,6 +1168,12 @@ MateService::~MateService() { shutdown(); }
 OperationResult MateService::start() {
   std::lock_guard lock(impl_->mutex);
   if (impl_->worker.joinable()) return OperationResult::InvalidState;
+  const auto remote = impl_->host.apply_remote_input_configuration(
+      impl_->runtime_configuration.remote);
+  if (remote != OperationResult::Success &&
+      remote != OperationResult::Unsupported) {
+    return remote;
+  }
   impl_->stopping = false;
   impl_->host.set_lifecycle_observer(this);
   if (impl_->explicit_selection) {
@@ -1096,6 +1238,56 @@ std::optional<DeviceId> MateService::active_device() const {
 
 std::uint64_t MateService::session_generation() const noexcept {
   return impl_->generation.load();
+}
+
+OperationResult MateService::apply_runtime_configuration(
+    const MateRuntimeConfiguration& configuration) {
+  auto result = std::make_shared<std::promise<OperationResult>>();
+  auto completed = result->get_future();
+  Impl::Task task{Impl::TaskKind::Configuration};
+  task.configuration = configuration;
+  task.configuration_result = std::move(result);
+  {
+    std::lock_guard lock(impl_->mutex);
+    if (!impl_->worker.joinable() || impl_->stopping) {
+      return OperationResult::InvalidState;
+    }
+  }
+  impl_->post(std::move(task));
+  return completed.get();
+}
+
+MateRuntimeConfiguration MateService::runtime_configuration() const {
+  std::lock_guard lock(impl_->mutex);
+  return impl_->runtime_configuration;
+}
+
+void MateService::set_frontend_observer(MateServiceFrontendObserver* observer) {
+  const auto snapshot = frontend_snapshot();
+  std::lock_guard lock(impl_->frontend_observer_mutex);
+  impl_->frontend_observer = observer;
+  if (observer) observer->on_service_snapshot(snapshot);
+}
+
+MateServiceSnapshot MateService::frontend_snapshot() const {
+  std::lock_guard lock(impl_->mutex);
+  auto snapshot = impl_->frontend_snapshot;
+  snapshot.running = impl_->worker.joinable() && !impl_->stopping;
+  return snapshot;
+}
+
+MateManualActionRequestId MateService::request_manual_action(
+    MateManualAction action) {
+  {
+    std::lock_guard lock(impl_->mutex);
+    if (!impl_->worker.joinable() || impl_->stopping) return 0;
+  }
+  const auto request = impl_->next_manual_request.fetch_add(1);
+  Impl::Task task{Impl::TaskKind::ManualAction};
+  task.manual_action = action;
+  task.manual_request = request;
+  impl_->post(std::move(task));
+  return request;
 }
 
 void MateService::on_host_lifecycle_notification(

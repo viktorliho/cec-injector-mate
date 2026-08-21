@@ -147,6 +147,7 @@ OperationResult LinuxRemoteInputController::release_active() {
 OperationResult LinuxRemoteInputController::emit_remote_action(
     SemanticRemoteAction action, RemoteActionState state,
     Clock::time_point now) {
+  if (!enabled_) return OperationResult::Success;
   const auto binding = binding_for(action);
   if (!binding || binding->keys.empty()) return OperationResult::Unsupported;
   if (state == RemoteActionState::Released) {
@@ -164,6 +165,28 @@ OperationResult LinuxRemoteInputController::emit_remote_action(
 
 OperationResult LinuxRemoteInputController::reset_remote_input() {
   return release_active();
+}
+
+OperationResult LinuxRemoteInputController::reconfigure(
+    bool enabled, LinuxRemoteInputProfile profile) {
+  const auto reset = reset_remote_input();
+  if (reset != OperationResult::Success) return reset;
+  enabled_ = enabled;
+  if (profile_ == profile) return OperationResult::Success;
+  profile_ = std::move(profile);
+  std::set<LinuxInputKey> capabilities;
+  for (int value = static_cast<int>(SemanticRemoteAction::Up);
+       value <= static_cast<int>(SemanticRemoteAction::Previous); ++value) {
+    const auto binding = binding_for(static_cast<SemanticRemoteAction>(value));
+    if (binding) capabilities.insert(binding->keys.begin(), binding->keys.end());
+  }
+  if (capabilities != capabilities_) {
+    if (device_created_) sink_->destroy();
+    device_created_ = false;
+    capabilities_ = std::move(capabilities);
+    if (enabled_) return ensure_device();
+  }
+  return OperationResult::Success;
 }
 
 OperationResult LinuxRemoteInputController::tick(Clock::time_point now) {

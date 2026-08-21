@@ -14,7 +14,10 @@ target_link_libraries(cec_injector_mate_composition
 target_compile_features(cec_injector_mate_composition INTERFACE cxx_std_20)
 
 find_package(Threads REQUIRED)
-add_library(cec_injector_mate_service src/mate_service.cpp)
+add_library(cec_injector_mate_service
+    src/mate_service.cpp
+    src/runtime_configuration.cpp
+    src/runtime_configuration_controller.cpp)
 add_library(CECInjector::MateService ALIAS cec_injector_mate_service)
 target_include_directories(cec_injector_mate_service PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include)

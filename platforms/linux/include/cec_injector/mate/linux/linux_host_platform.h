@@ -55,6 +55,7 @@ class LinuxHostPlatform final : public HostPlatform {
   void set_lifecycle_observer(HostLifecycleObserver* observer) override;
   [[nodiscard]] std::vector<DiscoveredDevice> discovered_devices() override;
   [[nodiscard]] PhysicalAddressResolution resolve_physical_address() override;
+  [[nodiscard]] DisplaySummary display_summary() override;
   OperationResult request_system_suspend() override;
   [[nodiscard]] HostPowerState host_power_state() const noexcept override;
   [[nodiscard]] AuthorizationState suspend_authorization() const override;
@@ -63,6 +64,8 @@ class LinuxHostPlatform final : public HostPlatform {
   OperationResult emit_remote_action(SemanticRemoteAction action,
                                      RemoteActionState state) override;
   OperationResult reset_remote_input() override;
+  OperationResult apply_remote_input_configuration(
+      const RemoteInputConfiguration& configuration) override;
 
   [[nodiscard]] std::shared_ptr<LinuxDeviceInventory> inventory() const {
     return inventory_;

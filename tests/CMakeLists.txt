@@ -53,3 +53,9 @@ else()
     target_compile_options(mate-service-tests PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 add_test(NAME mate-service COMMAND mate-service-tests)
+
+add_executable(mate-runtime-configuration-tests runtime_configuration_test.cpp)
+target_link_libraries(mate-runtime-configuration-tests PRIVATE
+    CECInjector::MateService)
+add_test(NAME mate-runtime-configuration
+    COMMAND mate-runtime-configuration-tests)

@@ -185,6 +185,10 @@ PhysicalAddressResolution LinuxHostPlatform::resolve_physical_address() {
   return impl_->physical_address.resolve();
 }
 
+DisplaySummary LinuxHostPlatform::display_summary() {
+  return impl_->physical_address.display_summary();
+}
+
 OperationResult LinuxHostPlatform::request_system_suspend() {
   return impl_->power ? impl_->power->request_system_suspend()
                       : OperationResult::Unsupported;
@@ -217,6 +221,17 @@ OperationResult LinuxHostPlatform::reset_remote_input() {
   std::lock_guard lock(impl_->input_mutex);
   return impl_->remote_input ? impl_->remote_input->reset_remote_input()
                              : OperationResult::Success;
+}
+
+OperationResult LinuxHostPlatform::apply_remote_input_configuration(
+    const RemoteInputConfiguration& configuration) {
+  std::lock_guard lock(impl_->input_mutex);
+  if (!impl_->remote_input) return OperationResult::Unsupported;
+  if (configuration.profile != RemoteInputProfile::SteamOsParity) {
+    return OperationResult::InvalidConfiguration;
+  }
+  return impl_->remote_input->reconfigure(
+      configuration.enabled, steamos_parity_remote_input_profile());
 }
 
 }  // namespace cec_injector::mate::linux_platform

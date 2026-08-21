@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "cec_injector/mate/types.h"
+#include "cec_injector/mate/runtime_configuration.h"
 
 namespace cec_injector::mate {
 
@@ -43,6 +44,13 @@ struct PhysicalAddressResolution {
   std::optional<std::uint16_t> address;
 
   bool operator==(const PhysicalAddressResolution&) const = default;
+};
+
+struct DisplaySummary {
+  std::string name;
+  bool edid_available{};
+  std::size_t edid_byte_count{};
+  bool operator==(const DisplaySummary&) const = default;
 };
 
 enum class HostPowerState {
@@ -183,6 +191,7 @@ class HostPlatform {
   virtual void set_lifecycle_observer(HostLifecycleObserver* observer) = 0;
   [[nodiscard]] virtual std::vector<DiscoveredDevice> discovered_devices() = 0;
   [[nodiscard]] virtual PhysicalAddressResolution resolve_physical_address() = 0;
+  [[nodiscard]] virtual DisplaySummary display_summary() { return {}; }
   virtual OperationResult request_system_suspend() = 0;
   [[nodiscard]] virtual HostPowerState host_power_state() const noexcept = 0;
   [[nodiscard]] virtual AuthorizationState suspend_authorization() const = 0;
@@ -191,6 +200,10 @@ class HostPlatform {
   virtual OperationResult emit_remote_action(SemanticRemoteAction action,
                                              RemoteActionState state) = 0;
   virtual OperationResult reset_remote_input() = 0;
+  virtual OperationResult apply_remote_input_configuration(
+      const RemoteInputConfiguration&) {
+    return OperationResult::Unsupported;
+  }
 };
 
 }  // namespace cec_injector::mate

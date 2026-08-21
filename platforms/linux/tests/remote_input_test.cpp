@@ -201,6 +201,29 @@ int main() {
   CHECK(failure_fake->create_count == 2);
   CHECK(recovering.reset_remote_input() == OperationResult::Success);
 
+  auto live_sink = std::make_unique<FakeSink>();
+  auto* live_fake = live_sink.get();
+  LinuxRemoteInputController live(std::move(live_sink), parity_profile);
+  CHECK(live.emit_remote_action(Action::Guide, State::Pressed, start) ==
+        OperationResult::Success);
+  CHECK(live.reconfigure(false, parity_profile) == OperationResult::Success);
+  CHECK(!live.active_action());
+  const auto disabled_events = live_fake->events.size();
+  CHECK(live.emit_remote_action(Action::Down, State::Pressed, start) ==
+        OperationResult::Success);
+  CHECK(live_fake->events.size() == disabled_events);
+  CHECK(live.reconfigure(true, parity_profile) == OperationResult::Success);
+  CHECK(live.emit_remote_action(Action::Down, State::Pressed, start) ==
+        OperationResult::Success);
+  CHECK(live.active_action() == Action::Down);
+  auto alternate = parity_profile;
+  alternate.bindings[Action::Guide] = {{KeyCode::LeftControl, KeyCode::Tab}};
+  CHECK(live.reconfigure(true, alternate) == OperationResult::Success);
+  CHECK(!live.active_action());
+  CHECK(live.emit_remote_action(Action::Guide, State::Pressed, start) ==
+        OperationResult::Success);
+  CHECK(live.reset_remote_input() == OperationResult::Success);
+
   CHECK(input.emit_remote_action(Action::Guide, State::Pressed) ==
         OperationResult::Unsupported);
   CHECK(input.emit_remote_action(Action::Home, State::Pressed) ==
