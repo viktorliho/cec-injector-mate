@@ -4,7 +4,7 @@ set -euo pipefail
 readonly device_commit=55fc7e6780e35cd5e636d140049ef68e99ad6950
 readonly libcec_commit=3519af0715e654c43382423d843ad658f2e01cb4
 readonly p8_commit=2748be52ae27e6007ef548b697d4a03ff7de4291
-readonly patch_sha=151e75f3d81578f90aca3bc343259eed381cc5e1a3f92c302c59fee12bb1980c
+readonly patch_sha=34cc15d55fc7c5d41cacd72cfae2c34fc386834d4aeb49d0464b0a2d003677fc
 readonly source_epoch=${SOURCE_DATE_EPOCH:?SOURCE_DATE_EPOCH is required}
 
 export LC_ALL=C.UTF-8 TZ=UTC ZERO_AR_DATE=1

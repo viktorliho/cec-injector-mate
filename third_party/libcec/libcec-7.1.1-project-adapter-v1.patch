@@ -414,3 +414,52 @@ index 064cc12..bb911c5 100644
  
      if (msg->ReplyIsError() && msg->state != ADAPTER_MESSAGE_STATE_SENT_NOT_ACKED)
 
+diff --git a/src/libcec/implementations/PHCommandHandler.cpp b/src/libcec/implementations/PHCommandHandler.cpp
+index 2339d158..051be045 100644
+--- a/src/libcec/implementations/PHCommandHandler.cpp
++++ b/src/libcec/implementations/PHCommandHandler.cpp
+@@ -56,22 +56,39 @@ CImageViewOnCheck::~CImageViewOnCheck(void)
+ 
+ void* CImageViewOnCheck::Process(void)
+ {
+-  CCECBusDevice* tv = m_handler->m_processor->GetDevice(CECDEVICE_TV);
++  CPHCommandHandler* const handler = m_handler;
++  if (!handler || !handler->m_processor || !handler->m_busDevice)
++    return NULL;
++
++  CCECBusDevice* const tv = handler->m_processor->GetDevice(CECDEVICE_TV);
++  CCECBusDevice* const busDevice = handler->m_busDevice;
++  P8PLATFORM::CMutex* const mutex = &handler->m_mutex;
++  int64_t* const activeSourcePending = &handler->m_iActiveSourcePending;
++  const cec_logical_address logicalAddress = busDevice->GetLogicalAddress();
++  if (!tv)
++    return NULL;
++
+   cec_power_status status(CEC_POWER_STATUS_UNKNOWN);
+   while (status != CEC_POWER_STATUS_ON)
+   {
+     m_event.Wait(TV_ON_CHECK_TIME_MS);
+-    if (!IsRunning())
++    if (IsStopped())
+       return NULL;
+ 
+-    status = tv->GetPowerStatus(m_handler->m_busDevice->GetLogicalAddress());
++    status = tv->GetPowerStatus(logicalAddress);
+ 
++    if (IsStopped())
++      return NULL;
+     if (status != CEC_POWER_STATUS_ON &&
+         status != CEC_POWER_STATUS_IN_TRANSITION_STANDBY_TO_ON)
+     {
+-      CLockObject lock(m_handler->m_mutex);
++      if (IsStopped())
++        return NULL;
++      CLockObject lock(*mutex);
++      if (IsStopped())
++        return NULL;
+       tv->OnImageViewOnSent(false);
+-      m_handler->m_iActiveSourcePending = GetTimeMs();
++      *activeSourcePending = GetTimeMs();
+     }
+   }
+   return NULL;

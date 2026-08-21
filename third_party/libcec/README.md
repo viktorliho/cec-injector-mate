@@ -3,7 +3,7 @@
 The production adapter uses Pulse-Eight libCEC 7.1.1 at upstream commit
 `3519af0715e654c43382423d843ad658f2e01cb4`. Apply
 `libcec-7.1.1-project-adapter-v1.patch` to that exact tree. The patch SHA-256
-is `151e75f3d81578f90aca3bc343259eed381cc5e1a3f92c302c59fee12bb1980c`.
+is `34cc15d55fc7c5d41cacd72cfae2c34fc386834d4aeb49d0464b0a2d003677fc`.
 
 The patch exports `cec_project_adapter_transaction_v1` (ABI version 1), so
 project extension transactions share libCEC's existing adapter connection and
