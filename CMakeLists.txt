@@ -14,16 +14,23 @@ option(CEC_INJECTOR_MATE_BUILD_LINUX
        "Build Linux platform implementations requiring host dependencies" OFF)
 option(CEC_INJECTOR_MATE_BUILD_MACOS
        "Build macOS platform implementations requiring Apple frameworks" OFF)
+option(CEC_INJECTOR_MATE_BUILD_GUI
+       "Build the optional Qt 6 Widgets frontend" OFF)
 
 add_subdirectory(mate-core)
 add_subdirectory(platform-support/edid)
 add_subdirectory(service)
 add_subdirectory(adapters/libcec)
+add_subdirectory(applications/frontend)
 if(CEC_INJECTOR_MATE_BUILD_LINUX)
     add_subdirectory(platforms/linux)
 endif()
 if(CEC_INJECTOR_MATE_BUILD_MACOS)
     add_subdirectory(platforms/macos)
+endif()
+if(CEC_INJECTOR_MATE_BUILD_GUI)
+    find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
+    add_subdirectory(applications/gui)
 endif()
 
 if(CEC_INJECTOR_MATE_BUILD_LINUX AND CEC_INJECTOR_MATE_BUILD_LIBCEC)

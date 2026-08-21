@@ -25,6 +25,12 @@ add_test(NAME mate-core-boundary-scan
         -P ${CMAKE_CURRENT_SOURCE_DIR}/core_boundary_scan.cmake
 )
 
+add_test(NAME mate-qt-boundary-scan
+    COMMAND ${CMAKE_COMMAND}
+        -DPROJECT_ROOT=${PROJECT_SOURCE_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/qt_boundary_scan.cmake
+)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CEC_INJECTOR_MATE_BUILD_LINUX)
     add_test(NAME mate-linux-remote-wake-rule
         COMMAND sh
