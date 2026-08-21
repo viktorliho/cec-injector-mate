@@ -17,9 +17,7 @@ std::optional<std::string> TopologyIdentity(
   std::vector<const DrmConnectorObservation*> connected;
   for (const auto& connector : connectors) {
     if (!connector.connected) continue;
-    if (!connector.edid ||
-        parse_edid_physical_address(*connector.edid).status ==
-            EdidPhysicalAddressStatus::Invalid) {
+    if (!connector.edid || !edid::edid_base_block_valid(*connector.edid)) {
       return std::nullopt;
     }
     connected.push_back(&connector);

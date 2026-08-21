@@ -19,13 +19,13 @@ bool block_checksum_valid(std::span<const std::uint8_t> block) {
   return checksum == 0;
 }
 
-bool base_block_valid(std::span<const std::uint8_t> edid) {
+}  // namespace
+
+bool edid_base_block_valid(std::span<const std::uint8_t> edid) {
   return edid.size() >= kEdidBlockSize &&
          std::equal(kEdidHeader.begin(), kEdidHeader.end(), edid.begin()) &&
          block_checksum_valid(edid.first(kEdidBlockSize));
 }
-
-}  // namespace
 
 bool physical_address_valid_for_source(std::uint16_t address) {
   if (address == 0 || address == 0xffff) return false;
@@ -43,7 +43,9 @@ bool physical_address_valid_for_source(std::uint16_t address) {
 
 EdidPhysicalAddressResult parse_edid_physical_address(
     std::span<const std::uint8_t> edid) {
-  if (!base_block_valid(edid) || edid.size() % kEdidBlockSize != 0) return {};
+  if (!edid_base_block_valid(edid) || edid.size() % kEdidBlockSize != 0) {
+    return {};
+  }
   const std::size_t declared_blocks = static_cast<std::size_t>(edid[126]) + 1;
   if (declared_blocks != edid.size() / kEdidBlockSize) return {};
   for (std::size_t offset = 0; offset < edid.size(); offset += kEdidBlockSize) {

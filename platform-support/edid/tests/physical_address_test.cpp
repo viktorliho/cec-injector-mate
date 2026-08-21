@@ -85,6 +85,12 @@ int main() {
   CHECK(parse_edid_physical_address(CtaWithoutHdmiVsdb()).status ==
         EdidPhysicalAddressStatus::NoPhysicalAddress);
 
+  auto base_only = EdidWithPa(0x1000);
+  base_only.resize(kBlockSize);
+  CHECK(edid_base_block_valid(base_only));
+  CHECK(parse_edid_physical_address(base_only).status ==
+        EdidPhysicalAddressStatus::Invalid);
+
   auto invalid = EdidWithPa(0x1000);
   invalid[0] = 1;
   CHECK(parse_edid_physical_address(invalid).status ==
