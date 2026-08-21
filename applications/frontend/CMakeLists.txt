@@ -1,11 +1,13 @@
 add_library(cec_injector_mate_frontend
     src/fake_frontend_backend.cpp
+    src/frontend_state_projector.cpp
 )
 add_library(CECInjector::MateFrontend ALIAS cec_injector_mate_frontend)
 
 target_include_directories(cec_injector_mate_frontend PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(cec_injector_mate_frontend PUBLIC CECInjector::MateCore)
+target_link_libraries(cec_injector_mate_frontend PUBLIC
+    CECInjector::MateCore CECInjector::MateService)
 target_compile_features(cec_injector_mate_frontend PUBLIC cxx_std_20)
 if(MSVC)
     target_compile_options(cec_injector_mate_frontend PRIVATE /W4)

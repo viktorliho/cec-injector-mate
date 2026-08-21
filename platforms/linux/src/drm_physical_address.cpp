@@ -125,4 +125,17 @@ PhysicalAddressResolution LinuxPhysicalAddressResolver::resolve_live() const {
   return observe_physical_address(*connectors).resolution;
 }
 
+DisplaySummary LinuxPhysicalAddressResolver::display_summary() const {
+  const auto connectors = ReadConnectors(drm_root_, drm_edid_reader_);
+  if (!connectors) return {};
+  const DrmConnectorObservation* selected = nullptr;
+  for (const auto& connector : *connectors) {
+    if (!connector.connected || !connector.edid) continue;
+    if (selected) return {};
+    selected = &connector;
+  }
+  if (!selected) return {};
+  return {selected->name, true, selected->edid->size()};
+}
+
 }  // namespace cec_injector::mate::linux_platform

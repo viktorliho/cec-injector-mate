@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "cec_injector/mate/host_platform.h"
-#include "cec_injector/mate/policy.h"
+#include "cec_injector/mate/runtime_configuration.h"
 
 namespace cec_injector::mate::frontend {
 
@@ -21,15 +21,16 @@ struct FrontendCapabilities {
   bool operator==(const FrontendCapabilities&) const = default;
 };
 
-struct FrontendConfiguration {
-  PolicyConfiguration policy;
-  bool remote_input_enabled{};
-  std::string remote_profile;
+using FrontendConfiguration = MateRuntimeConfiguration;
 
-  bool operator==(const FrontendConfiguration&) const = default;
+struct FrontendConfigurationSnapshot {
+  std::uint64_t revision{1};
+  FrontendConfiguration configuration;
+  bool operator==(const FrontendConfigurationSnapshot&) const = default;
 };
 
 struct FrontendStatus {
+  bool service_available{};
   bool injector_connected{};
   std::optional<DeviceId> selected_device;
   std::string device_display_name;
@@ -59,6 +60,13 @@ struct FrontendActionResult {
 };
 
 using FrontendActionRequestId = std::uint64_t;
+using FrontendConfigurationRequestId = std::uint64_t;
+
+struct FrontendConfigurationResult {
+  OperationResult result{OperationResult::InvalidState};
+  FrontendConfigurationSnapshot authoritative;
+  std::string message;
+};
 
 enum class CecDirection { Received, Transmitted };
 
@@ -84,6 +92,11 @@ class MateFrontendObserver {
   virtual void on_frontend_action_completed(
       FrontendActionRequestId request,
       const FrontendActionResult& result) = 0;
+  virtual void on_frontend_configuration_changed(
+      const FrontendConfigurationSnapshot&) {}
+  virtual void on_frontend_configuration_completed(
+      FrontendConfigurationRequestId,
+      const FrontendConfigurationResult&) {}
 };
 
 class MateFrontendBackend {
@@ -93,8 +106,9 @@ class MateFrontendBackend {
   virtual void set_observer(MateFrontendObserver* observer) = 0;
   [[nodiscard]] virtual FrontendStatus status() const = 0;
   [[nodiscard]] virtual FrontendCapabilities capabilities() const = 0;
-  [[nodiscard]] virtual FrontendConfiguration configuration() const = 0;
-  virtual OperationResult apply_configuration(
+  [[nodiscard]] virtual FrontendConfigurationSnapshot configuration() const = 0;
+  [[nodiscard]] virtual FrontendConfigurationRequestId request_configuration(
+      std::uint64_t base_revision,
       const FrontendConfiguration& configuration) = 0;
   // Acceptance only means the request was assigned an id. Completion may be
   // delivered later by an in-process worker or daemon IPC implementation.

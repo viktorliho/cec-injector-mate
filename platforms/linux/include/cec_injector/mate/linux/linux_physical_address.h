@@ -64,6 +64,7 @@ class LinuxPhysicalAddressResolver {
   // Read-only live query for platform diagnostics. It neither reads nor
   // writes the configured cache.
   [[nodiscard]] PhysicalAddressResolution resolve_live() const;
+  [[nodiscard]] DisplaySummary display_summary() const;
 
  private:
   std::filesystem::path drm_root_;

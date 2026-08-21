@@ -11,6 +11,10 @@
 #include "cec_injector/mate/linux/linux_device_session_factory.h"
 #include "cec_injector/mate/linux/linux_host_platform.h"
 #include "cec_injector/mate/mate_service.h"
+#include "cec_injector/mate/runtime_configuration.h"
+#include "cec_injector/mate/runtime_configuration_io.h"
+#include "cec_injector/mate/runtime_configuration_controller.h"
+#include "cec_injector/mate/frontend_linux/linux_dbus_frontend_service.h"
 
 namespace {
 
@@ -23,6 +27,7 @@ void Usage() {
       << "usage: cec-injector-mate --pa-cache PATH [options]\n"
       << "  --uinput PATH\n  --device-id ID\n"
       << "  --remote-profile steamos-parity\n"
+      << "  --runtime-config PATH\n"
       << "  --boot-once [--startup-timeout SECONDS]\n"
       << "  --power-on-boot --power-on-resume --standby-on-suspend\n"
       << "  --standby-on-shutdown --suspend-on-tv-standby\n"
@@ -37,6 +42,8 @@ int main(int argc, char** argv) {
   LinuxHostPlatformConfiguration host_configuration;
   MateServiceConfiguration service_configuration;
   bool boot_once = false;
+  std::optional<std::filesystem::path> runtime_config_path;
+  auto authoritative_configuration = MateRuntimeConfiguration{};
   std::chrono::seconds startup_timeout{30};
   for (int index = 1; index < argc; ++index) {
     const std::string_view option(argv[index]);
@@ -61,6 +68,10 @@ int main(int argc, char** argv) {
         return Usage(), 2;
       }
       host_configuration.input_profile = steamos_parity_remote_input_profile();
+    } else if (option == "--runtime-config") {
+      const auto* path = value();
+      if (!path) return Usage(), 2;
+      runtime_config_path = path;
     } else if (option == "--boot-once") {
       boot_once = true;
     } else if (option == "--startup-timeout") {
@@ -101,6 +112,21 @@ int main(int argc, char** argv) {
     Usage();
     return 2;
   }
+  if (runtime_config_path) {
+    const auto loaded = load_runtime_configuration(*runtime_config_path);
+    if (!loaded.ok()) {
+      std::cerr << "cec-injector-mate: invalid runtime configuration: "
+                << loaded.error << '\n';
+      return 2;
+    }
+    service_configuration.policy = loaded.configuration.policy;
+    service_configuration.remote = loaded.configuration.remote;
+    authoritative_configuration = loaded.configuration;
+  } else {
+    authoritative_configuration = {service_configuration.policy,
+                                   service_configuration.remote};
+  }
+  host_configuration.input_profile = steamos_parity_remote_input_profile();
 
   if (boot_once) {
     host_configuration.profile = LinuxHostPlatformProfile::Boot;
@@ -151,6 +177,22 @@ int main(int argc, char** argv) {
       service.shutdown();
       return 0;
     }
+    if (!runtime_config_path) {
+      std::cerr << "cec-injector-mate: main daemon requires --runtime-config\n";
+      service.shutdown();
+      return 2;
+    }
+    RuntimeConfigurationController configuration_controller(
+        service,
+        std::make_unique<FileRuntimeConfigurationStore>(*runtime_config_path),
+        authoritative_configuration);
+    frontend_linux::LinuxDbusFrontendService dbus_frontend(
+        service, configuration_controller);
+    if (dbus_frontend.start() != OperationResult::Success) {
+      std::cerr << "cec-injector-mate: system D-Bus frontend failed to start\n";
+      service.shutdown();
+      return 1;
+    }
     std::signal(SIGINT, Stop);
     std::signal(SIGTERM, Stop);
     using namespace std::chrono_literals;
@@ -158,6 +200,7 @@ int main(int argc, char** argv) {
       std::this_thread::sleep_for(500ms);
       service.refresh_discovery();
     }
+    dbus_frontend.stop();
     service.shutdown();
     return 0;
   } catch (const std::exception& error) {

@@ -24,12 +24,16 @@ add_subdirectory(adapters/libcec)
 add_subdirectory(applications/frontend)
 if(CEC_INJECTOR_MATE_BUILD_LINUX)
     add_subdirectory(platforms/linux)
+    add_subdirectory(applications/frontend-linux)
 endif()
 if(CEC_INJECTOR_MATE_BUILD_MACOS)
     add_subdirectory(platforms/macos)
 endif()
 if(CEC_INJECTOR_MATE_BUILD_GUI)
     find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
+    if(CEC_INJECTOR_MATE_BUILD_LINUX)
+        find_package(Qt6 REQUIRED COMPONENTS DBus)
+    endif()
     add_subdirectory(applications/gui)
 endif()
 
@@ -38,7 +42,8 @@ if(CEC_INJECTOR_MATE_BUILD_LINUX AND CEC_INJECTOR_MATE_BUILD_LIBCEC)
     target_link_libraries(cec-injector-mate PRIVATE
         CECInjector::MateService
         CECInjector::MateLinuxHostPlatform
-        CECInjector::MateLinuxSessionFactory)
+        CECInjector::MateLinuxSessionFactory
+        CECInjector::MateLinuxDbusFrontend)
     target_compile_features(cec-injector-mate PRIVATE cxx_std_20)
     target_compile_options(cec-injector-mate PRIVATE
         -Wall -Wextra -Wpedantic)

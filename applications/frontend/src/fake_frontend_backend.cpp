@@ -5,6 +5,7 @@
 namespace cec_injector::mate::frontend {
 
 FakeFrontendBackend::FakeFrontendBackend() {
+  status_.service_available = true;
   status_.injector_connected = true;
   status_.selected_device = DeviceId("synthetic-device-1");
   status_.device_display_name = "CEC Injector (synthetic)";
@@ -23,14 +24,14 @@ FakeFrontendBackend::FakeFrontendBackend() {
                    .tv_power_actions = true,
                    .cec_monitor = true};
 
-  configuration_.policy = {.power_on_boot = true,
+  configuration_.configuration.policy = {.power_on_boot = true,
                            .power_on_resume = true,
                            .standby_on_suspend = true,
                            .standby_on_shutdown = true,
                            .suspend_on_tv_standby = true,
                            .wake_host_on_tv_source_request = true};
-  configuration_.remote_input_enabled = true;
-  configuration_.remote_profile = "Desktop navigation (synthetic)";
+  configuration_.configuration.remote.enabled = true;
+  configuration_.configuration.remote.profile = RemoteInputProfile::SteamOsParity;
 
   const auto now = std::chrono::system_clock::now();
   events_ = {
@@ -70,17 +71,26 @@ FrontendCapabilities FakeFrontendBackend::capabilities() const {
   return capabilities_;
 }
 
-FrontendConfiguration FakeFrontendBackend::configuration() const {
+FrontendConfigurationSnapshot FakeFrontendBackend::configuration() const {
   std::lock_guard lock(mutex_);
   return configuration_;
 }
 
-OperationResult FakeFrontendBackend::apply_configuration(
-    const FrontendConfiguration& configuration) {
+FrontendConfigurationRequestId FakeFrontendBackend::request_configuration(
+    std::uint64_t base_revision, const FrontendConfiguration& configuration) {
   std::lock_guard lock(mutex_);
-  configuration_ = configuration;
-  if (observer_) observer_->on_frontend_status_changed(status_);
-  return OperationResult::Success;
+  const auto request = next_configuration_request_++;
+  FrontendConfigurationResult result;
+  if (base_revision != configuration_.revision) {
+    result = {OperationResult::Rejected, configuration_, "revision conflict"};
+  } else {
+    ++configuration_.revision;
+    configuration_.configuration = configuration;
+    result = {OperationResult::Success, configuration_, {}};
+    if (observer_) observer_->on_frontend_configuration_changed(configuration_);
+  }
+  if (observer_) observer_->on_frontend_configuration_completed(request, result);
+  return request;
 }
 
 FrontendActionRequestId FakeFrontendBackend::request_action(
