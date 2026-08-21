@@ -95,6 +95,36 @@ jobs:
             "${units}/cec-injector-mate.service" \
             "${units}/cec-injector-mate-boot.service"
 
+  gui-linux:
+    name: GUI Linux
+    runs-on: ubuntu-latest
+    container: debian:12
+
+    steps:
+      - name: Install GUI dependencies
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends \
+            ca-certificates cmake g++ git make qt6-base-dev qt6-base-dev-tools
+
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Configure optional GUI
+        run: |
+          cmake -S . -B build/ci-gui \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTING=ON \
+            -DCEC_INJECTOR_MATE_BUILD_GUI=ON
+
+      - name: Build GUI
+        run: cmake --build build/ci-gui --parallel
+
+      - name: Test GUI and portable boundaries
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build/ci-gui --output-on-failure
+
   patched-libcec:
     name: Patched libCEC tests
     runs-on: ubuntu-latest
