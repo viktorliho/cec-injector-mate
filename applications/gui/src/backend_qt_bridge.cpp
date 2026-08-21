@@ -34,4 +34,19 @@ void BackendQtBridge::on_frontend_action_completed(
       Qt::QueuedConnection);
 }
 
+void BackendQtBridge::on_frontend_configuration_changed(
+    const frontend::FrontendConfigurationSnapshot& value) {
+  QMetaObject::invokeMethod(
+      this, [this, value] { emit configurationChanged(value); },
+      Qt::QueuedConnection);
+}
+
+void BackendQtBridge::on_frontend_configuration_completed(
+    frontend::FrontendConfigurationRequestId request,
+    const frontend::FrontendConfigurationResult& result) {
+  QMetaObject::invokeMethod(
+      this, [this, request, result] { emit configurationCompleted(request, result); },
+      Qt::QueuedConnection);
+}
+
 }  // namespace cec_injector::mate::gui

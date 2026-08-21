@@ -25,6 +25,8 @@ class CecMonitorModel final : public QAbstractTableModel {
 
   void setEvents(std::vector<frontend::FrontendCecEvent> events);
   void appendEvent(frontend::FrontendCecEvent event);
+  void clear();
+  static constexpr std::size_t kMaximumEvents = 2000;
 
  private:
   std::vector<frontend::FrontendCecEvent> events_;

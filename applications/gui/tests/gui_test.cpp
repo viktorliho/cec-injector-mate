@@ -51,6 +51,13 @@ int main(int argc, char** argv) {
        .semantic = "test"});
   Check(window.cecMonitorModel()->rowCount() == before + 1,
         "CEC monitor accepts rows");
+  for (std::size_t index = 0;
+       index < cec_injector::mate::gui::CecMonitorModel::kMaximumEvents + 10;
+       ++index) {
+    window.cecMonitorModel()->appendEvent({});
+  }
+  Check(window.cecMonitorModel()->rowCount() == 2000,
+        "CEC monitor history is bounded");
   auto* power = window.findChild<QPushButton*>("powerOnAction");
   auto* result = window.findChild<QLabel*>("actionResult");
   Check(power && result, "typed action controls exist");
@@ -58,4 +65,14 @@ int main(int argc, char** argv) {
   application.processEvents();
   Check(result->text().contains("Success") && result->text().contains("12 ms"),
         "action result rendered");
+  auto* boot = window.findChild<QCheckBox*>("powerOnBoot");
+  auto* apply = window.findChild<QPushButton*>("applyConfiguration");
+  auto* reset = window.findChild<QPushButton*>("resetConfiguration");
+  Check(boot && apply && reset && !apply->isEnabled(),
+        "configuration starts authoritative and clean");
+  boot->setChecked(!boot->isChecked());
+  Check(apply->isEnabled() && reset->isEnabled(), "configuration dirty state");
+  apply->click();
+  application.processEvents();
+  Check(!apply->isEnabled(), "confirmed configuration clears dirty state");
 }

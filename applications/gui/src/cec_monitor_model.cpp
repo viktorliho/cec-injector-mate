@@ -72,10 +72,21 @@ void CecMonitorModel::setEvents(
 }
 
 void CecMonitorModel::appendEvent(frontend::FrontendCecEvent event) {
+  if (events_.size() == kMaximumEvents) {
+    beginRemoveRows({}, 0, 0);
+    events_.erase(events_.begin());
+    endRemoveRows();
+  }
   const auto row = static_cast<int>(events_.size());
   beginInsertRows({}, row, row);
   events_.push_back(std::move(event));
   endInsertRows();
+}
+
+void CecMonitorModel::clear() {
+  beginResetModel();
+  events_.clear();
+  endResetModel();
 }
 
 }  // namespace cec_injector::mate::gui
