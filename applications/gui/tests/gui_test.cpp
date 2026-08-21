@@ -13,11 +13,92 @@
 #include "cec_injector/mate/gui/main_window.h"
 
 namespace {
+using namespace cec_injector::mate;
+using namespace cec_injector::mate::frontend;
 
 void Check(bool value, std::string_view message) {
   if (value) return;
   std::cerr << "CHECK failed: " << message << '\n';
   std::exit(1);
+}
+
+class ControlledBackend final : public MateFrontendBackend {
+ public:
+  ControlledBackend() {
+    status_.service_available = true;
+    capabilities_.configuration = true;
+    configuration_.revision = 1;
+    configuration_.configuration = production_runtime_defaults();
+  }
+
+  void set_observer(MateFrontendObserver* observer) override { observer_ = observer; }
+  FrontendStatus status() const override { return status_; }
+  FrontendCapabilities capabilities() const override { return capabilities_; }
+  FrontendConfigurationSnapshot configuration() const override {
+    return configuration_;
+  }
+  FrontendConfigurationRequestId request_configuration(
+      std::uint64_t base, const FrontendConfiguration& value) override {
+    requested_base = base;
+    requested = value;
+    return next_request++;
+  }
+  FrontendActionRequestId request_action(FrontendAction) override { return 1; }
+
+  void change(const FrontendConfigurationSnapshot& value) {
+    configuration_ = value;
+    observer_->on_frontend_configuration_changed(value);
+  }
+  void complete(FrontendConfigurationRequestId request, OperationResult result,
+                std::uint64_t revision, std::string message = {}) {
+    observer_->on_frontend_configuration_completed(
+        request, {result, {revision, configuration_.configuration},
+                  std::move(message)});
+  }
+  void disappear() {
+    status_.service_available = false;
+    observer_->on_frontend_status_changed(status_);
+  }
+  void appear(const FrontendConfigurationSnapshot& value) {
+    status_.service_available = true;
+    observer_->on_frontend_status_changed(status_);
+    change(value);
+  }
+
+  std::uint64_t requested_base{};
+  FrontendConfiguration requested;
+  FrontendConfigurationRequestId next_request{41};
+
+ private:
+  MateFrontendObserver* observer_{};
+  FrontendStatus status_;
+  FrontendCapabilities capabilities_;
+  FrontendConfigurationSnapshot configuration_;
+};
+
+void FlushEvents(QApplication& application) {
+  application.processEvents();
+  application.processEvents();
+}
+
+struct ConfigurationControls {
+  QCheckBox* resume;
+  QPushButton* apply;
+  QPushButton* reset;
+  QLabel* result;
+};
+
+ConfigurationControls Controls(cec_injector::mate::gui::MainWindow& window) {
+  return {window.findChild<QCheckBox*>("powerOnResume"),
+          window.findChild<QPushButton*>("applyConfiguration"),
+          window.findChild<QPushButton*>("resetConfiguration"),
+          window.findChild<QLabel*>("configurationResult")};
+}
+
+void BeginApply(ConfigurationControls controls) {
+  controls.resume->setChecked(false);
+  Check(controls.apply->isEnabled(), "edited configuration can apply");
+  controls.apply->click();
 }
 
 }  // namespace
@@ -75,4 +156,96 @@ int main(int argc, char** argv) {
   apply->click();
   application.processEvents();
   Check(!apply->isEnabled(), "confirmed configuration clears dirty state");
+
+  {
+    auto backend = std::make_unique<ControlledBackend>();
+    auto* control = backend.get();
+    cec_injector::mate::gui::MainWindow ordered(std::move(backend));
+    FlushEvents(application);
+    auto controls = Controls(ordered);
+    BeginApply(controls);
+    auto own = FrontendConfigurationSnapshot{2, control->requested};
+    control->change(own);
+    FlushEvents(application);
+    control->complete(41, OperationResult::Success, 2);
+    FlushEvents(application);
+    Check(controls.result->text() == "Configuration applied" &&
+              !controls.apply->isEnabled() && !controls.reset->isEnabled(),
+          "own change before completion finishes cleanly");
+  }
+
+  {
+    auto backend = std::make_unique<ControlledBackend>();
+    auto* control = backend.get();
+    cec_injector::mate::gui::MainWindow ordered(std::move(backend));
+    FlushEvents(application);
+    auto controls = Controls(ordered);
+    BeginApply(controls);
+    control->complete(41, OperationResult::Success, 2);
+    FlushEvents(application);
+    control->change({2, control->requested});
+    FlushEvents(application);
+    Check(controls.result->text() == "Configuration applied" &&
+              !controls.apply->isEnabled() && !controls.reset->isEnabled(),
+          "completion before own change finishes cleanly");
+    control->complete(41, OperationResult::Success, 2);
+    FlushEvents(application);
+    Check(controls.result->text() == "Configuration applied",
+          "duplicate completion ignored");
+  }
+
+  {
+    auto backend = std::make_unique<ControlledBackend>();
+    auto* control = backend.get();
+    cec_injector::mate::gui::MainWindow conflicting(std::move(backend));
+    FlushEvents(application);
+    auto controls = Controls(conflicting);
+    BeginApply(controls);
+    auto external = production_runtime_defaults();
+    external.policy.power_on_boot = false;
+    control->change({2, external});
+    FlushEvents(application);
+    control->complete(41, OperationResult::Rejected, 2, "revision conflict");
+    FlushEvents(application);
+    Check(controls.result->text().contains("revision conflict") &&
+              controls.reset->isEnabled() && !controls.apply->isEnabled(),
+          "external change and stale rejection require reset");
+  }
+
+  {
+    auto backend = std::make_unique<ControlledBackend>();
+    auto* control = backend.get();
+    cec_injector::mate::gui::MainWindow failed(std::move(backend));
+    FlushEvents(application);
+    auto controls = Controls(failed);
+    BeginApply(controls);
+    control->complete(41, OperationResult::InternalError, 1, "persist failed");
+    FlushEvents(application);
+    Check(controls.result->text().contains("persist failed") &&
+              controls.apply->isEnabled() && controls.reset->isEnabled(),
+          "failed apply preserves editable state");
+  }
+
+  {
+    auto backend = std::make_unique<ControlledBackend>();
+    auto* control = backend.get();
+    cec_injector::mate::gui::MainWindow lost(std::move(backend));
+    FlushEvents(application);
+    auto controls = Controls(lost);
+    BeginApply(controls);
+    control->disappear();
+    FlushEvents(application);
+    control->complete(41, OperationResult::Success, 2);
+    FlushEvents(application);
+    Check(controls.result->text() == "Mate service unavailable" &&
+              !controls.apply->isEnabled(),
+          "service loss invalidates pending apply and late completion");
+    auto fresh = production_runtime_defaults();
+    fresh.policy.power_on_boot = false;
+    control->appear({3, fresh});
+    FlushEvents(application);
+    Check(controls.result->text().contains("Reset required") &&
+              controls.reset->isEnabled() && !controls.apply->isEnabled(),
+          "fresh state after service recovery wins without stale correlation");
+  }
 }

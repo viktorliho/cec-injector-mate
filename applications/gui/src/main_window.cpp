@@ -121,18 +121,7 @@ MainWindow::MainWindow(std::unique_ptr<frontend::MateFrontendBackend> backend,
   connect(bridge_.get(), &BackendQtBridge::configurationChanged, this,
           &MainWindow::renderConfiguration);
   connect(bridge_.get(), &BackendQtBridge::configurationCompleted, this,
-          [this](frontend::FrontendConfigurationRequestId,
-                 const frontend::FrontendConfigurationResult& result) {
-            configuration_pending_ = false;
-            if (result.result == OperationResult::Success) {
-              configuration_result_->setText(QStringLiteral("Configuration applied"));
-            } else {
-              configuration_result_->setText(
-                  QStringLiteral("Apply failed: %1").arg(
-                      QString::fromStdString(result.message)));
-            }
-            markConfigurationDirty();
-          });
+          &MainWindow::completeConfiguration);
   renderConfiguration(backend_->configuration());
   renderStatus(backend_->status());
 }
@@ -194,6 +183,7 @@ QWidget* MainWindow::createBehaviorPage() {
   add(power_on_boot_, "Turn TV on when computer boots");
   power_on_boot_->setObjectName(QStringLiteral("powerOnBoot"));
   add(power_on_resume_, "Turn TV on when computer wakes");
+  power_on_resume_->setObjectName(QStringLiteral("powerOnResume"));
   add(standby_on_suspend_, "Put TV in standby when computer sleeps");
   add(standby_on_shutdown_, "Put TV in standby when computer shuts down");
   add(suspend_on_tv_standby_, "Suspend computer when TV enters standby");
@@ -204,6 +194,7 @@ QWidget* MainWindow::createBehaviorPage() {
   apply_configuration_->setObjectName(QStringLiteral("applyConfiguration"));
   reset_configuration_->setObjectName(QStringLiteral("resetConfiguration"));
   configuration_result_ = new QLabel;
+  configuration_result_->setObjectName(QStringLiteral("configurationResult"));
   connect(apply_configuration_, &QPushButton::clicked, this,
           &MainWindow::applyConfiguration);
   connect(reset_configuration_, &QPushButton::clicked, this,
@@ -348,6 +339,11 @@ void MainWindow::addPage(const QString& title, QWidget* page, bool lab_only) {
 }
 
 void MainWindow::renderStatus(const frontend::FrontendStatus& status) {
+  if (!status.service_available && configuration_pending_) {
+    configuration_pending_ = false;
+    pending_configuration_request_ = 0;
+    configuration_result_->setText(QStringLiteral("Mate service unavailable"));
+  }
   const bool mutable_available = status.service_available;
   for (auto* control : {power_on_boot_, power_on_resume_, standby_on_suspend_,
                         standby_on_shutdown_, suspend_on_tv_standby_,
@@ -396,6 +392,23 @@ void MainWindow::renderStatus(const frontend::FrontendStatus& status) {
 
 void MainWindow::renderConfiguration(
     const frontend::FrontendConfigurationSnapshot& value) {
+  if (configuration_pending_) {
+    const bool own_change =
+        value.revision == pending_configuration_base_revision_ + 1 &&
+        value.configuration == pending_configuration_value_;
+    if (!own_change) {
+      if (value.revision == authoritative_configuration_.revision &&
+          value.configuration == authoritative_configuration_.configuration) {
+        return;
+      }
+      authoritative_configuration_ = value;
+      external_conflict_ = true;
+      configuration_result_->setText(
+          QStringLiteral("Configuration changed externally — Reset required"));
+      markConfigurationDirty();
+      return;
+    }
+  }
   if (configuration_dirty_ && !configuration_pending_) {
     if (value.revision != authoritative_configuration_.revision) {
       external_conflict_ = true;
@@ -428,6 +441,32 @@ void MainWindow::renderConfiguration(
   markConfigurationDirty();
 }
 
+void MainWindow::completeConfiguration(
+    frontend::FrontendConfigurationRequestId request,
+    const frontend::FrontendConfigurationResult& result) {
+  if (!configuration_pending_ || request != pending_configuration_request_) return;
+  const auto expected_revision = pending_configuration_base_revision_ + 1;
+  if (result.result == OperationResult::Success &&
+      result.authoritative.revision == expected_revision) {
+    renderConfiguration({expected_revision, pending_configuration_value_});
+    configuration_pending_ = false;
+    pending_configuration_request_ = 0;
+    external_conflict_ = false;
+    configuration_result_->setText(QStringLiteral("Configuration applied"));
+  } else {
+    configuration_pending_ = false;
+    pending_configuration_request_ = 0;
+    if (result.result == OperationResult::Rejected) {
+      authoritative_configuration_ = result.authoritative;
+      external_conflict_ = true;
+    }
+    configuration_result_->setText(
+        QStringLiteral("Apply failed: %1").arg(
+            QString::fromStdString(result.message)));
+  }
+  markConfigurationDirty();
+}
+
 void MainWindow::markConfigurationDirty() {
   if (!power_on_boot_) return;
   const auto& value = authoritative_configuration_.configuration;
@@ -455,10 +494,14 @@ void MainWindow::applyConfiguration() {
   value.policy.wake_host_on_tv_source_request = wake_on_source_->isChecked();
   value.remote.enabled = remote_enabled_->isChecked();
   configuration_pending_ = true;
+  pending_configuration_base_revision_ = authoritative_configuration_.revision;
+  pending_configuration_value_ = value;
+  pending_configuration_request_ = 0;
   configuration_result_->setText(QStringLiteral("Applying…"));
   markConfigurationDirty();
   const auto request = backend_->request_configuration(
       authoritative_configuration_.revision, value);
+  pending_configuration_request_ = request;
   if (request == 0) {
     configuration_pending_ = false;
     configuration_result_->setText(QStringLiteral("Mate service unavailable"));

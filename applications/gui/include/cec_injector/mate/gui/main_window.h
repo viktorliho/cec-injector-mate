@@ -49,6 +49,9 @@ class MainWindow final : public QMainWindow {
   void renderStatus(const frontend::FrontendStatus& status);
   void renderConfiguration(
       const frontend::FrontendConfigurationSnapshot& configuration);
+  void completeConfiguration(
+      frontend::FrontendConfigurationRequestId request,
+      const frontend::FrontendConfigurationResult& result);
   void markConfigurationDirty();
   void applyConfiguration();
   void resetConfiguration();
@@ -88,6 +91,9 @@ class MainWindow final : public QMainWindow {
   bool configuration_dirty_{};
   bool configuration_pending_{};
   bool external_conflict_{};
+  frontend::FrontendConfigurationRequestId pending_configuration_request_{};
+  std::uint64_t pending_configuration_base_revision_{};
+  frontend::FrontendConfiguration pending_configuration_value_{};
   CecMonitorModel* monitor_model_{};
   bool lab_mode_{};
   std::vector<QListWidgetItem*> lab_items_;
