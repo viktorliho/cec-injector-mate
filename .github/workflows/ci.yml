@@ -308,7 +308,7 @@ jobs:
           ! grep -nE '/opt/homebrew/Cellar/libcec|/opt/homebrew/Cellar/p8-platform|/opt/homebrew/include/libcec|/opt/homebrew/include/p8-platform' \
             /tmp/libcec-build/compile_commands.json
           nm -gU "${CEC_PREFIX}/lib/libcec.dylib" \
-            | grep ' cec_project_adapter_transaction_v1$'
+            | grep 'cec_project_adapter_transaction_v1'
 
       - name: Configure Mate against patched libCEC
         run: |
