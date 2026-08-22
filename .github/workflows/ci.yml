@@ -69,7 +69,7 @@ jobs:
           apt-get update
           apt-get install --yes --no-install-recommends \
             ca-certificates cmake g++ git libdrm-dev libsystemd-dev \
-            libudev-dev make pkg-config systemd
+            libudev-dev make pkg-config systemd zsh
 
       - name: Check out source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
