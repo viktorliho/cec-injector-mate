@@ -94,6 +94,7 @@ jobs:
           while IFS= read -r script; do
             case "$(head -n 1 "$script")" in
               *bash*) bash -n "$script" ;;
+              *zsh*) zsh -n "$script" ;;
               *) sh -n "$script" ;;
             esac
           done < <(find packaging -type f -name '*.sh' -print | sort)
@@ -326,11 +327,12 @@ jobs:
 
       - name: Verify runtime linkage
         run: |
-          otool -L build/ci-macos-patched-libcec-gui/applications/gui/cec-injector-mate-gui \
+          gui_bin=build/ci-macos-patched-libcec-gui/applications/gui/cec-injector-mate-gui.app/Contents/MacOS/cec-injector-mate-gui
+          otool -L "$gui_bin" \
             | grep '@rpath/libcec.7.dylib'
-          otool -L build/ci-macos-patched-libcec-gui/applications/gui/cec-injector-mate-gui \
+          otool -L "$gui_bin" \
             | grep '@rpath/libp8-platform.2.dylib'
-          otool -l build/ci-macos-patched-libcec-gui/applications/gui/cec-injector-mate-gui \
+          otool -l "$gui_bin" \
             | grep -A2 LC_RPATH \
             | grep "${CEC_PREFIX}/lib"
 
