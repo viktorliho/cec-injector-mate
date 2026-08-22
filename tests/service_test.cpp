@@ -376,7 +376,7 @@ void TestInputStandbyAndLifecycle() {
   REQUIRE(service.start() == OperationResult::Success);
   service.wait_idle();
   auto record = factory.records.back();
-  REQUIRE(record->wake_queries == 1 && record->wake_configures == 1 &&
+  REQUIRE(record->wake_queries == 2 && record->wake_configures == 1 &&
         record->wake_arms == 1);
 
   record->frame({0x04, 0x44, 0x01});
@@ -498,7 +498,7 @@ void TestGenerationAndBoot() {
   service.wait_idle();
   auto first = factory.records.back();
   REQUIRE(first->powers == 0 && first->active_sources == 0);
-  REQUIRE(first->wake_queries == 0 && first->wake_configures == 0 &&
+  REQUIRE(first->wake_queries == 1 && first->wake_configures == 0 &&
           first->wake_arms == 0 && first->wake_disarms == 0);
   first->lose_on_power = true;
   service.trigger_boot();
@@ -534,7 +534,7 @@ void TestBootWaitsForSelectionAndPaWithoutSessionMaintenance() {
   service.wait_idle();
   REQUIRE(service.has_active_session());
   auto record = factory.records.back();
-  REQUIRE(record->wake_queries == 0 && record->wake_configures == 0 &&
+  REQUIRE(record->wake_queries == 1 && record->wake_configures == 0 &&
           record->wake_arms == 0 && record->wake_disarms == 0);
 
   // A replacement session during readiness still cannot create Boot intent.

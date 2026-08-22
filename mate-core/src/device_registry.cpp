@@ -37,7 +37,9 @@ std::vector<CoreIntent> DeviceRegistry::reconcile(bool selected_was_lost) {
   if (selected_was_lost) {
     intents.push_back({CoreIntentKind::DisconnectDevice, *previous});
     snapshot_.selected_active.reset();
-    if (!snapshot_.explicit_selection) automatic_reselection_suppressed_ = true;
+    if (!snapshot_.explicit_selection) {
+      automatic_reselection_suppressed_ = !snapshot_.discovered.empty();
+    }
   }
 
   std::optional<DeviceId> desired;

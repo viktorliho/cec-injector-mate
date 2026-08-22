@@ -237,7 +237,7 @@ int main(int argc, char** argv) {
     FlushEvents(application);
     control->complete(41, OperationResult::Success, 2);
     FlushEvents(application);
-    Check(controls.result->text() == "Mate service unavailable" &&
+    Check(controls.result->text().contains("unavailable", Qt::CaseInsensitive) &&
               !controls.apply->isEnabled(),
           "service loss invalidates pending apply and late completion");
     auto fresh = production_runtime_defaults();

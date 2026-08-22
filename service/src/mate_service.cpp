@@ -558,6 +558,7 @@ struct MateService::Impl {
       }
       drop_session();
     } else {
+      (void)session->query_wake_state();
       if (diagnostics) {
         diagnostics(std::string("DeviceSession connected device=") +
                     std::string(id.diagnostic_value()) +

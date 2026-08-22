@@ -112,7 +112,7 @@ MainWindow::MainWindow(std::unique_ptr<frontend::MateFrontendBackend> backend,
                                       ? power_on_action_
                                   : value.action == frontend::FrontendAction::MakeActiveSource
                                       ? active_source_action_ : standby_action_;
-            if (button) button->setEnabled(backend_->status().service_available);
+            if (button) renderStatus(backend_->status());
             action_result_->setText(QStringLiteral("%1 — %2 ms — %3")
                                         .arg(ResultName(value.result))
                                         .arg(value.duration.count())
@@ -339,23 +339,34 @@ void MainWindow::addPage(const QString& title, QWidget* page, bool lab_only) {
 }
 
 void MainWindow::renderStatus(const frontend::FrontendStatus& status) {
+  const auto capabilities = backend_->capabilities();
   if (!status.service_available && configuration_pending_) {
     configuration_pending_ = false;
     pending_configuration_request_ = 0;
-    configuration_result_->setText(QStringLiteral("Mate service unavailable"));
+    configuration_result_->setText(QStringLiteral("Backend unavailable"));
   }
-  const bool mutable_available = status.service_available;
-  for (auto* control : {power_on_boot_, power_on_resume_, standby_on_suspend_,
-                        standby_on_shutdown_, suspend_on_tv_standby_,
-                        wake_on_source_, remote_enabled_}) {
-    if (control) control->setEnabled(mutable_available);
+  const bool configuration_available =
+      status.service_available && capabilities.configuration;
+  const bool remote_input_available =
+      configuration_available && capabilities.remote_input;
+  const bool remote_wake_available =
+      configuration_available && capabilities.remote_wake;
+  const bool action_available =
+      status.service_available && capabilities.tv_power_actions &&
+      status.session_state == SessionState::Connected;
+  for (auto* control :
+       {power_on_boot_, power_on_resume_, standby_on_suspend_,
+        standby_on_shutdown_, suspend_on_tv_standby_}) {
+    if (control) control->setEnabled(configuration_available);
   }
+  if (wake_on_source_) wake_on_source_->setEnabled(remote_wake_available);
+  if (remote_enabled_) remote_enabled_->setEnabled(remote_input_available);
   for (auto* button : {power_on_action_, active_source_action_, standby_action_}) {
-    if (button) button->setEnabled(mutable_available);
+    if (button) button->setEnabled(action_available);
   }
   connection_value_->setText(
-      !status.service_available ? QStringLiteral("Mate service unavailable")
-      : !status.selected_device ? QStringLiteral("Daemon available — no Injector")
+      !status.service_available ? QStringLiteral("Backend unavailable")
+      : !status.selected_device ? QStringLiteral("Injector not discovered")
       : status.injector_connected ? QStringLiteral("Connected")
                                   : QStringLiteral("Injector present — connecting"));
   display_value_->setText(QString::fromStdString(status.display_name));
@@ -374,8 +385,8 @@ void MainWindow::renderStatus(const frontend::FrontendStatus& status) {
                                                : QStringLiteral("Supported, not armed"))
                            : QStringLiteral("Unsupported"));
   backend_status_value_->setText(status.service_available
-                                      ? QStringLiteral("Daemon available")
-                                      : QStringLiteral("Service unavailable"));
+                                     ? QStringLiteral("In-process backend running")
+                                     : QStringLiteral("Backend unavailable"));
   lab_display_value_->setText(QString::fromStdString(status.display_name));
   lab_pa_status_value_->setText(
       status.physical_address_status == PhysicalAddressStatus::Available
@@ -387,6 +398,14 @@ void MainWindow::renderStatus(const frontend::FrontendStatus& status) {
                            ? QStringLiteral("Available, %1 bytes")
                                  .arg(status.edid_byte_count)
                            : QStringLiteral("Unavailable"));
+  if (configuration_result_ && !capabilities.configuration &&
+      !configuration_pending_) {
+    configuration_result_->setText(
+        QStringLiteral("Configuration unavailable on this platform"));
+  }
+  if (remote_profile_ && !capabilities.remote_input) {
+    remote_profile_->setText(QStringLiteral("Unavailable on this platform"));
+  }
   markConfigurationDirty();
 }
 
@@ -479,8 +498,11 @@ void MainWindow::markConfigurationDirty() {
       wake_on_source_->isChecked() != value.policy.wake_host_on_tv_source_request ||
       remote_enabled_->isChecked() != value.remote.enabled;
   const bool available = backend_->status().service_available;
-  apply_configuration_->setEnabled(available && configuration_dirty_ &&
-                                    !configuration_pending_ && !external_conflict_);
+  const auto capabilities = backend_->capabilities();
+  apply_configuration_->setEnabled(available && capabilities.configuration &&
+                                   configuration_dirty_ &&
+                                   !configuration_pending_ &&
+                                   !external_conflict_);
   reset_configuration_->setEnabled(configuration_dirty_ || external_conflict_);
 }
 
@@ -504,7 +526,9 @@ void MainWindow::applyConfiguration() {
   pending_configuration_request_ = request;
   if (request == 0) {
     configuration_pending_ = false;
-    configuration_result_->setText(QStringLiteral("Mate service unavailable"));
+    configuration_result_->setText(backend_->capabilities().configuration
+                                       ? QStringLiteral("Backend unavailable")
+                                       : QStringLiteral("Configuration unavailable on this platform"));
     markConfigurationDirty();
     return;
   }

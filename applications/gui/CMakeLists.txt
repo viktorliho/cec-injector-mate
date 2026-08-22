@@ -22,6 +22,21 @@ if(CEC_INJECTOR_MATE_BUILD_LINUX)
     target_compile_definitions(cec_injector_mate_gui_support PUBLIC
         CEC_INJECTOR_MATE_GUI_LINUX_DBUS=1)
 endif()
+if(CEC_INJECTOR_MATE_BUILD_MACOS)
+    target_sources(cec_injector_mate_gui_support PRIVATE
+        include/cec_injector/mate/gui/macos/mac_in_process_mate_frontend_backend.h
+        platforms/macos/src/mac_in_process_mate_frontend_backend.cpp)
+    target_link_libraries(cec_injector_mate_gui_support PUBLIC
+        CECInjector::MateService
+        CECInjector::MateMacDiscovery
+        CECInjector::MateMacPhysicalAddress
+        CECInjector::MateMacSessionFactory
+        "-framework CoreGraphics"
+        "-framework IOKit"
+        "-framework CoreFoundation")
+    target_compile_definitions(cec_injector_mate_gui_support PUBLIC
+        CEC_INJECTOR_MATE_GUI_MACOS_IN_PROCESS=1)
+endif()
 
 add_executable(cec-injector-mate-gui src/main.cpp)
 target_link_libraries(cec-injector-mate-gui PRIVATE
@@ -34,6 +49,14 @@ if(BUILD_TESTING)
     add_test(NAME mate-gui COMMAND mate-gui-tests)
     set_tests_properties(mate-gui PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    if(CEC_INJECTOR_MATE_BUILD_MACOS)
+        add_executable(mate-macos-frontend-backend-tests
+            tests/mac_in_process_backend_test.cpp)
+        target_link_libraries(mate-macos-frontend-backend-tests PRIVATE
+            cec_injector_mate_gui_support)
+        add_test(NAME mate-macos-frontend-backend COMMAND
+            mate-macos-frontend-backend-tests)
+    endif()
     if(CEC_INJECTOR_MATE_BUILD_LINUX)
         add_executable(mate-dbus-vertical-tests tests/dbus_vertical_test.cpp)
         target_link_libraries(mate-dbus-vertical-tests PRIVATE
