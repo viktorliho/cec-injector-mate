@@ -4,6 +4,7 @@
 #include <memory>
 #include <thread>
 #include "cec_injector/mate/libcec/libcec_device_session.h"
+#include "cec_injector/mate/libcec/osd_name.h"
 using namespace cec_injector::mate;using namespace cec_injector::mate::libcec;
 namespace {
 struct Fake final:LibCecApi{DisconnectCallback lost;FrameCallback frame;int opens{},closes{},actions{};bool short_reason{},reject_arm{};std::chrono::milliseconds open_delay{},transaction_delay{};std::vector<std::uint8_t> commands;std::vector<std::uint16_t> initialized_addresses;std::vector<std::uint16_t>* initialization_log{};
@@ -19,7 +20,8 @@ struct Observer:DeviceSessionObserver{int frames{},losses{};std::vector<std::uin
  void on_external_cec_frame(const DeviceId&,std::span<const std::uint8_t> f)override{++frames;last.assign(f.begin(),f.end());}void on_wake_state_changed(const DeviceId&,const WakeState&)override{}};
 void check(bool x,const char*m){if(!x)throw m;}
 }
-int main(){try{Fake* raw{};std::vector<std::uint16_t> initialization_log;std::vector<std::string> diagnostics;LibCecDeviceSession s(DeviceId("device-a"),{0x2100},{"opaque-port",std::chrono::milliseconds(1000),[&](std::string_view x){diagnostics.emplace_back(x);}},[&]{auto p=std::make_unique<Fake>();p->initialization_log=&initialization_log;raw=p.get();return p;});Observer o;s.set_observer(&o);
+int main(){try{for(const auto size:{0u,13u,14u,15u,64u}){const std::string input(size,'x');const auto name=make_libcec_osd_name(input);const auto encoded=std::char_traits<char>::length(name.data());check(encoded==std::min<std::size_t>(size,14),"OSD byte boundary");check(2+encoded<=16,"OSD frame boundary");check(name.back()=='\0',"OSD terminator");}for(int iteration=0;iteration<100;++iteration){const auto name=make_libcec_osd_name("12345678901234");check(std::char_traits<char>::length(name.data())==14,"OSD max boundary stress");check(2+std::char_traits<char>::length(name.data())==16,"OSD exact frame stress");}const std::string utf8="1234567890123\xC3\xA9";const auto utf8_name=make_libcec_osd_name(utf8);check(std::char_traits<char>::length(utf8_name.data())==14,"OSD UTF-8 byte count");
+ Fake* raw{};std::vector<std::uint16_t> initialization_log;std::vector<std::string> diagnostics;LibCecDeviceSession s(DeviceId("device-a"),{0x2100},{"opaque-port",std::chrono::milliseconds(1000),[&](std::string_view x){diagnostics.emplace_back(x);}},[&]{auto p=std::make_unique<Fake>();p->initialization_log=&initialization_log;raw=p.get();return p;});Observer o;s.set_observer(&o);
  check(s.state()==SessionState::Discovered,"construction remains disconnected");check(initialization_log.empty(),"construction performs no device operation");
  check(s.connect()==OperationResult::Success,"connect");check(s.state()==SessionState::Connected,"state");check(s.snapshot().addresses.logical==4,"logical");check(raw->opens==1,"single open");
  check(raw->initialized_addresses==std::vector<std::uint16_t>({0x2100}),"configured physical address");

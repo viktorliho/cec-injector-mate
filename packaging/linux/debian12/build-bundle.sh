@@ -4,7 +4,7 @@ set -euo pipefail
 readonly device_commit=55fc7e6780e35cd5e636d140049ef68e99ad6950
 readonly libcec_commit=3519af0715e654c43382423d843ad658f2e01cb4
 readonly p8_commit=2748be52ae27e6007ef548b697d4a03ff7de4291
-readonly patch_sha=34cc15d55fc7c5d41cacd72cfae2c34fc386834d4aeb49d0464b0a2d003677fc
+readonly patch_sha=2f7eb96e157735be3ea9a64cb933a61ad48e95887cdf5d3a701a98ee73fc4c2f
 readonly source_epoch=${SOURCE_DATE_EPOCH:?SOURCE_DATE_EPOCH is required}
 
 export LC_ALL=C.UTF-8 TZ=UTC ZERO_AR_DATE=1
@@ -62,7 +62,7 @@ gui_sha=$(sha256sum /out/bundle/bin/cec-injector-mate-gui | cut -d' ' -f1)
 cec_sha=$(sha256sum /out/bundle/lib/libcec.so.7 | cut -d' ' -f1)
 p8_sha=$(sha256sum /out/bundle/lib/libp8-platform.so.2 | cut -d' ' -f1)
 cat >/out/bundle/MANIFEST.txt <<EOF
-CEC Injector Mate DIAGNOSTIC BOOT POWER TRACE
+CEC Injector Mate production bundle
 Mate commit: $mate_commit
 Device context commit: $device_commit
 libCEC: 7.1.1, commit $libcec_commit
@@ -78,7 +78,7 @@ GUI Qt platform plugins: system Wayland and XCB
 libcec.so.7 SHA-256: $cec_sha
 libp8-platform.so.2 SHA-256: $p8_sha
 Source date epoch: $source_epoch
-Status: NOT PROMOTABLE
+Status: production-installation-candidate
 EOF
 tar --sort=name --mtime="@$source_epoch" --owner=0 --group=0 --numeric-owner \
   --format=posix --pax-option=delete=atime,delete=ctime -C /out -cf - bundle \

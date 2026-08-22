@@ -135,7 +135,7 @@ jobs:
     env:
       LIBCEC_COMMIT: 3519af0715e654c43382423d843ad658f2e01cb4
       P8_PLATFORM_COMMIT: 2748be52ae27e6007ef548b697d4a03ff7de4291
-      LIBCEC_PATCH_SHA256: 34cc15d55fc7c5d41cacd72cfae2c34fc386834d4aeb49d0464b0a2d003677fc
+      LIBCEC_PATCH_SHA256: 2f7eb96e157735be3ea9a64cb933a61ad48e95887cdf5d3a701a98ee73fc4c2f
 
     steps:
       - name: Install production adapter dependencies

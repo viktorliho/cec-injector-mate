@@ -1,4 +1,5 @@
 #include "cec_injector/mate/libcec/libcec_api.h"
+#include "cec_injector/mate/libcec/osd_name.h"
 #include <array>
 #include <atomic>
 #include <cstring>
@@ -17,7 +18,7 @@ class RealApi final : public LibCecApi {
   void set_disconnect_callback(DisconnectCallback c)override{disconnect_=std::move(c);}
   void set_frame_callback(FrameCallback c)override{frame_=std::move(c);}
   BackendResult initialize(std::uint16_t pa)override{CEC::libcec_configuration c;c.Clear();c.clientVersion=CEC::LIBCEC_VERSION_CURRENT;
-    std::strncpy(c.strDeviceName,"CEC Injector Mate",sizeof(c.strDeviceName)-1);c.deviceTypes.Clear();c.deviceTypes.Add(CEC::CEC_DEVICE_TYPE_PLAYBACK_DEVICE);
+    const auto osd_name=make_libcec_osd_name("CEC Injector Mate");std::memcpy(c.strDeviceName,osd_name.data(),osd_name.size());c.deviceTypes.Clear();c.deviceTypes.Add(CEC::CEC_DEVICE_TYPE_PLAYBACK_DEVICE);
     c.iPhysicalAddress=pa;c.bAutodetectAddress=0;c.bActivateSource=0;c.bPowerOffOnStandby=0;
 #if CEC_LIB_VERSION_MAJOR >= 5
     c.bAutoPowerOn=0;
