@@ -14,6 +14,8 @@ OperationResult map_backend_result(BackendResult r){switch(r){
  case BackendResult::InternalError:return OperationResult::InternalError;}return OperationResult::InternalError;}
 #ifndef CEC_INJECTOR_MATE_HAVE_REAL_LIBCEC
 std::unique_ptr<LibCecApi> create_real_libcec_api(){return {};}
+std::unique_ptr<LibCecApi> create_real_libcec_api_with_diagnostics(
+    std::function<void(std::string_view)>){return {};}
 #endif
 class LibCecDeviceSession::Impl final : public detail::SessionEventObserver {
  public:

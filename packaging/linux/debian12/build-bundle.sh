@@ -62,7 +62,7 @@ gui_sha=$(sha256sum /out/bundle/bin/cec-injector-mate-gui | cut -d' ' -f1)
 cec_sha=$(sha256sum /out/bundle/lib/libcec.so.7 | cut -d' ' -f1)
 p8_sha=$(sha256sum /out/bundle/lib/libp8-platform.so.2 | cut -d' ' -f1)
 cat >/out/bundle/MANIFEST.txt <<EOF
-CEC Injector Mate production bundle
+CEC Injector Mate DIAGNOSTIC BOOT POWER TRACE
 Mate commit: $mate_commit
 Device context commit: $device_commit
 libCEC: 7.1.1, commit $libcec_commit
@@ -78,7 +78,7 @@ GUI Qt platform plugins: system Wayland and XCB
 libcec.so.7 SHA-256: $cec_sha
 libp8-platform.so.2 SHA-256: $p8_sha
 Source date epoch: $source_epoch
-Status: production-installation-candidate
+Status: NOT PROMOTABLE
 EOF
 tar --sort=name --mtime="@$source_epoch" --owner=0 --group=0 --numeric-owner \
   --format=posix --pax-option=delete=atime,delete=ctime -C /out -cf - bundle \

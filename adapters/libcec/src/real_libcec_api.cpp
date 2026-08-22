@@ -1,6 +1,8 @@
 #include "cec_injector/mate/libcec/libcec_api.h"
 #include <array>
+#include <atomic>
 #include <cstring>
+#include <string>
 #include <libcec/cec.h>
 extern "C" std::int32_t cec_project_adapter_transaction_v1(
     void*, std::uint8_t, const std::uint8_t*, std::uint32_t, std::uint8_t*,
@@ -9,6 +11,8 @@ namespace cec_injector::mate::libcec {
 namespace {
 class RealApi final : public LibCecApi {
  public:
+  explicit RealApi(std::function<void(std::string_view)> diagnostics = {})
+      : diagnostics_(std::move(diagnostics)) {}
   ~RealApi() override { close(); if(adapter_)CECDestroy(adapter_); }
   void set_disconnect_callback(DisconnectCallback c)override{disconnect_=std::move(c);}
   void set_frame_callback(FrameCallback c)override{frame_=std::move(c);}
@@ -18,12 +22,19 @@ class RealApi final : public LibCecApi {
 #if CEC_LIB_VERSION_MAJOR >= 5
     c.bAutoPowerOn=0;
 #endif
-    callbacks_.Clear();callbacks_.alert=&alert;callbacks_.commandReceived=&command;c.callbacks=&callbacks_;c.callbackParam=this;adapter_=CECInitialise(&c);return adapter_?BackendResult::Success:BackendResult::InternalError;}
+    callbacks_.Clear();callbacks_.alert=&alert;callbacks_.commandReceived=&command;callbacks_.logMessage=&log_message;c.callbacks=&callbacks_;c.callbackParam=this;adapter_=CECInitialise(&c);return adapter_?BackendResult::Success:BackendResult::InternalError;}
   BackendResult open(std::string_view p,std::chrono::milliseconds t)override{std::string path(p);if(!adapter_)return BackendResult::NotOpen;
     if(!adapter_->Open(path.c_str(),static_cast<std::uint32_t>(t.count())))return BackendResult::Disconnected;logical_=static_cast<std::uint8_t>(adapter_->GetLogicalAddresses().primary);return BackendResult::Success;}
   void close()override{logical_.reset();if(adapter_)adapter_->Close();}
   std::optional<std::uint8_t> logical_address()const override{return logical_;}
-  BackendResult power_on_tv()override{return boolean(adapter_&&adapter_->PowerOnDevices(CEC::CECDEVICE_TV));}
+  BackendResult power_on_tv()override{
+    log("libCEC PowerOnTv call logical_address=" +
+        (logical_ ? std::to_string(*logical_) : std::string("none")));
+    tracing_power_on_.store(true);
+    const bool accepted=adapter_&&adapter_->PowerOnDevices(CEC::CECDEVICE_TV);
+    tracing_power_on_.store(false);
+    log(std::string("libCEC PowerOnTv raw_result=")+(accepted?"true":"false"));
+    return boolean(accepted);}
   BackendResult standby_broadcast()override{return boolean(adapter_&&adapter_->StandbyDevices(CEC::CECDEVICE_BROADCAST));}
   BackendResult make_active_source()override{return boolean(adapter_&&adapter_->SetActiveSource(CEC::CEC_DEVICE_TYPE_PLAYBACK_DEVICE));}
   BackendResult project_transaction(std::uint8_t c,std::span<const std::uint8_t> q,std::vector<std::uint8_t>& r,std::chrono::milliseconds t)override{
@@ -35,11 +46,17 @@ class RealApi final : public LibCecApi {
       case 6:return BackendResult::MalformedResponse;case 7:return BackendResult::Disconnected;
       case 8:return BackendResult::BufferTooSmall;default:return BackendResult::InternalError;}}
  private:
+  void log(std::string message)const{if(!diagnostics_)return;try{diagnostics_(message);}catch(...){}}
+  static void CEC_CDECL log_message(void* p,const CEC::cec_log_message* message){auto*self=static_cast<RealApi*>(p);if(!self||!message||!message->message||!self->tracing_power_on_.load())return;self->log("libCEC PowerOnTv level="+std::to_string(static_cast<unsigned>(message->level))+" message="+message->message);}
   static BackendResult boolean(bool ok){return ok?BackendResult::Success:BackendResult::Rejected;}
   static void CEC_CDECL alert(void* p,CEC::libcec_alert a,const CEC::libcec_parameter){auto*self=static_cast<RealApi*>(p);if(self&&a==CEC::CEC_ALERT_CONNECTION_LOST&&self->disconnect_)self->disconnect_();}
   static void CEC_CDECL command(void* p,const CEC::cec_command* c){auto*self=static_cast<RealApi*>(p);if(!self||!c||!self->frame_)return;PortableCecFrame f{static_cast<std::uint8_t>(c->initiator),static_cast<std::uint8_t>(c->destination)};
     if(c->opcode_set)f.opcode=static_cast<std::uint8_t>(c->opcode);for(std::uint8_t i=0;i<c->parameters.size;++i)f.parameters.push_back(c->parameters[i]);self->frame_(std::move(f));}
-  CEC::ICECAdapter* adapter_{};CEC::ICECCallbacks callbacks_;DisconnectCallback disconnect_;FrameCallback frame_;std::optional<std::uint8_t> logical_;
+  CEC::ICECAdapter* adapter_{};CEC::ICECCallbacks callbacks_;DisconnectCallback disconnect_;FrameCallback frame_;std::optional<std::uint8_t> logical_;std::function<void(std::string_view)> diagnostics_;std::atomic<bool> tracing_power_on_{};
 };}
 std::unique_ptr<LibCecApi> create_real_libcec_api(){return std::make_unique<RealApi>();}
+std::unique_ptr<LibCecApi> create_real_libcec_api_with_diagnostics(
+    std::function<void(std::string_view)> diagnostics){
+  return std::make_unique<RealApi>(std::move(diagnostics));
+}
 }  // namespace cec_injector::mate::libcec

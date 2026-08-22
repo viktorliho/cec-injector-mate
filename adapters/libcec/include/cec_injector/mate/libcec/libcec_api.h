@@ -34,4 +34,6 @@ class LibCecApi {
 };
 using LibCecApiFactory = std::function<std::unique_ptr<LibCecApi>()>;
 [[nodiscard]] std::unique_ptr<LibCecApi> create_real_libcec_api();
+[[nodiscard]] std::unique_ptr<LibCecApi> create_real_libcec_api_with_diagnostics(
+    std::function<void(std::string_view)> diagnostics);
 }  // namespace cec_injector::mate::libcec

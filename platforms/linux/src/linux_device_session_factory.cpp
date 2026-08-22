@@ -30,7 +30,10 @@ std::unique_ptr<DeviceSession> LinuxDeviceSessionFactory::create_session(
   return std::make_unique<libcec::LibCecDeviceSession>(
       device.id, configuration,
       libcec::LibCecSessionOptions{current->explicit_port.string(),
-                                   operation_timeout_, diagnostics_});
+                                   operation_timeout_, diagnostics_},
+      [diagnostics = diagnostics_] {
+        return libcec::create_real_libcec_api_with_diagnostics(diagnostics);
+      });
 }
 
 }  // namespace cec_injector::mate::linux_platform
