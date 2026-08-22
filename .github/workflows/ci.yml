@@ -38,6 +38,26 @@ jobs:
       - name: Test
         run: ctest --preset host-debug
 
+  macos-portable:
+    name: macOS portable
+    runs-on: macos-26
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Configure
+        run: |
+          cmake -S . -B build/ci-macos-portable \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build/ci-macos-portable --parallel
+
+      - name: Test
+        run: ctest --test-dir build/ci-macos-portable --output-on-failure
+
   linux:
     name: Linux and packaging tests
     runs-on: ubuntu-latest
@@ -128,6 +148,35 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: ctest --test-dir build/ci-gui --output-on-failure
 
+  macos-gui:
+    name: macOS GUI
+    runs-on: macos-26
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Install GUI dependencies
+        run: brew install pkg-config qt
+
+      - name: Resolve Qt prefix
+        run: echo "QT_CMAKE_PREFIX=$(brew --prefix qt)/lib/cmake" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: |
+          cmake -S . -B build/ci-macos-gui \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTING=ON \
+            -DCEC_INJECTOR_MATE_BUILD_MACOS=ON \
+            -DCEC_INJECTOR_MATE_BUILD_GUI=ON \
+            -DCMAKE_PREFIX_PATH="${QT_CMAKE_PREFIX}"
+
+      - name: Build
+        run: cmake --build build/ci-macos-gui --parallel
+
+      - name: Test
+        run: ctest --test-dir build/ci-macos-gui --output-on-failure
+
   patched-libcec:
     name: Patched libCEC tests
     runs-on: ubuntu-latest
@@ -200,3 +249,92 @@ jobs:
         run: |
           LD_LIBRARY_PATH=/tmp/cec-prefix/lib \
             ctest --test-dir build/ci-patched-libcec --output-on-failure
+
+  macos-patched-libcec-gui:
+    name: macOS patched libCEC + GUI
+    runs-on: macos-26
+    env:
+      LIBCEC_COMMIT: 3519af0715e654c43382423d843ad658f2e01cb4
+      P8_PLATFORM_COMMIT: 2748be52ae27e6007ef548b697d4a03ff7de4291
+      LIBCEC_PATCH_SHA256: 2f7eb96e157735be3ea9a64cb933a61ad48e95887cdf5d3a701a98ee73fc4c2f
+      CEC_PREFIX: /tmp/cec-prefix
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Install macOS dependencies
+        run: brew install pkg-config qt
+
+      - name: Resolve Qt prefix
+        run: echo "QT_CMAKE_PREFIX=$(brew --prefix qt)/lib/cmake" >> "$GITHUB_ENV"
+
+      - name: Fetch pinned public dependencies
+        run: |
+          git clone https://github.com/Pulse-Eight/platform.git /tmp/p8-platform
+          git -C /tmp/p8-platform checkout --detach "${P8_PLATFORM_COMMIT}"
+          test "$(git -C /tmp/p8-platform rev-parse HEAD)" = "${P8_PLATFORM_COMMIT}"
+          git clone https://github.com/Pulse-Eight/libcec.git /tmp/libcec
+          git -C /tmp/libcec checkout --detach "${LIBCEC_COMMIT}"
+          test "$(git -C /tmp/libcec rev-parse HEAD)" = "${LIBCEC_COMMIT}"
+
+      - name: Verify and apply maintained libCEC patch
+        run: |
+          echo "${LIBCEC_PATCH_SHA256}  third_party/libcec/libcec-7.1.1-project-adapter-v1.patch" \
+            | shasum -a 256 --check
+          git -C /tmp/libcec apply \
+            "${GITHUB_WORKSPACE}/third_party/libcec/libcec-7.1.1-project-adapter-v1.patch"
+
+      - name: Build pinned p8-platform
+        run: |
+          cmake -S /tmp/p8-platform -B /tmp/p8-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${CEC_PREFIX}" \
+            -DBUILD_SHARED_LIBS=ON
+          cmake --build /tmp/p8-build --parallel
+          cmake --install /tmp/p8-build
+
+      - name: Build pinned libCEC
+        run: |
+          PKG_CONFIG_LIBDIR="${CEC_PREFIX}/lib/pkgconfig" \
+          CMAKE_PREFIX_PATH="${CEC_PREFIX}" \
+            cmake -S /tmp/libcec -B /tmp/libcec-build \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX="${CEC_PREFIX}" \
+              -DBUILD_SHARED_LIBS=ON \
+              -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake --build /tmp/libcec-build --parallel
+          cmake --install /tmp/libcec-build
+          ! rg -n '/opt/homebrew/Cellar/libcec|/opt/homebrew/Cellar/p8-platform|/opt/homebrew/include/libcec|/opt/homebrew/include/p8-platform' \
+            /tmp/libcec-build/compile_commands.json
+          nm -gU "${CEC_PREFIX}/lib/libcec.dylib" \
+            | grep ' cec_project_adapter_transaction_v1$'
+
+      - name: Configure Mate against patched libCEC
+        run: |
+          PKG_CONFIG_LIBDIR="${CEC_PREFIX}/lib/pkgconfig" \
+            cmake -S . -B build/ci-macos-patched-libcec-gui \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DBUILD_TESTING=ON \
+              -DCEC_INJECTOR_MATE_BUILD_MACOS=ON \
+              -DCEC_INJECTOR_MATE_BUILD_GUI=ON \
+              -DCEC_INJECTOR_MATE_BUILD_LIBCEC=ON \
+              -DCMAKE_PREFIX_PATH="${CEC_PREFIX};${QT_CMAKE_PREFIX}"
+
+      - name: Build Mate
+        run: cmake --build build/ci-macos-patched-libcec-gui --parallel
+
+      - name: Verify runtime linkage
+        run: |
+          otool -L build/ci-macos-patched-libcec-gui/applications/gui/cec-injector-mate-gui \
+            | grep '@rpath/libcec.7.dylib'
+          otool -L build/ci-macos-patched-libcec-gui/applications/gui/cec-injector-mate-gui \
+            | grep '@rpath/libp8-platform.2.dylib'
+          otool -l build/ci-macos-patched-libcec-gui/applications/gui/cec-injector-mate-gui \
+            | grep -A2 LC_RPATH \
+            | grep "${CEC_PREFIX}/lib"
+
+      - name: Run full tests
+        run: |
+          DYLD_LIBRARY_PATH="${CEC_PREFIX}/lib" \
+            ctest --test-dir build/ci-macos-patched-libcec-gui --output-on-failure
