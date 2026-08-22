@@ -114,7 +114,14 @@ require_file "$libcec_bundle"
 require_file "$libp8_bundle"
 require_file "$resources_dir/LICENSE"
 require_file "$resources_dir/THIRD_PARTY.md"
+require_file "$resources_dir/cec-injector-mate.icns"
 require_file "$resources_dir/third_party/libcec-7.1.1-project-adapter-v1.patch"
+
+[[ "$(plutil -extract CFBundleIconFile raw "$info_plist")" == \
+    "cec-injector-mate.icns" ]] || {
+    echo "unexpected or missing CFBundleIconFile" >&2
+    exit 1
+}
 
 plutil -lint "$info_plist" >/dev/null
 nm -gU "$libcec_bundle" | grep -E '(_)?cec_project_adapter_transaction_v1$' >/dev/null

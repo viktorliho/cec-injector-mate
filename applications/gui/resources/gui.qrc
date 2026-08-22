@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="/cec-injector/mate">
+    <file alias="cec-injector-mate.png">icon/hicolor/256x256/apps/cec-injector-mate.png</file>
+  </qresource>
+</RCC>

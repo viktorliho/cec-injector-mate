@@ -1,4 +1,5 @@
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
 
 set(CEC_INJECTOR_MATE_GUI_GIT_SHORT_HASH "unknown")
 set(CEC_INJECTOR_MATE_GUI_GIT_HASH "unknown")
@@ -70,7 +71,9 @@ if(CEC_INJECTOR_MATE_BUILD_MACOS)
         CEC_INJECTOR_MATE_GUI_MACOS_IN_PROCESS=1)
 endif()
 
-add_executable(cec-injector-mate-gui src/main.cpp)
+add_executable(cec-injector-mate-gui
+    resources/gui.qrc
+    src/main.cpp)
 target_link_libraries(cec-injector-mate-gui PRIVATE
     cec_injector_mate_gui_support)
 if(APPLE)

@@ -45,6 +45,9 @@ if test -z "$desktop_home" && test -n "$desktop_user"; then
 fi
 if test -n "$desktop_home"; then
   rm -f -- "$desktop_home/.local/share/applications/cec-injector-mate.desktop"
+  for size in 16x16 32x32 48x48 64x64 128x128 256x256 512x512; do
+    rm -f -- "$desktop_home/.local/share/icons/hicolor/$size/apps/cec-injector-mate.png"
+  done
 fi
 rm -rf -- "${root}/opt/cec-injector-mate"
 if $purge_state; then

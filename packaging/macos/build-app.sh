@@ -39,6 +39,8 @@ require_tool otool
 require_tool codesign
 require_tool plutil
 require_tool shasum
+require_tool sips
+require_tool iconutil
 require_tool "$macdeployqt_bin"
 require_tool "$audit_script"
 
@@ -104,6 +106,27 @@ rm -rf "$app_path" "$stage_root"
 mkdir -p "$stage_root"
 cp -R "$mate_build/applications/gui/cec-injector-mate-gui.app" "$stage_app_path"
 mkdir -p "$stage_app_path/Contents/Frameworks" "$stage_app_path/Contents/Resources/third_party"
+
+icon_source="$repo_root/applications/gui/resources/icon/cec-injector-mate.png"
+iconset="$stage_root/cec-injector-mate.iconset"
+mkdir -p "$iconset"
+for spec in \
+    '16 icon_16x16.png' \
+    '32 icon_16x16@2x.png' \
+    '32 icon_32x32.png' \
+    '64 icon_32x32@2x.png' \
+    '128 icon_128x128.png' \
+    '256 icon_128x128@2x.png' \
+    '256 icon_256x256.png' \
+    '512 icon_256x256@2x.png' \
+    '512 icon_512x512.png' \
+    '1024 icon_512x512@2x.png'; do
+    size=${spec%% *}
+    name=${spec#* }
+    sips -z "$size" "$size" "$icon_source" --out "$iconset/$name" >/dev/null
+done
+iconutil -c icns "$iconset" \
+    -o "$stage_app_path/Contents/Resources/cec-injector-mate.icns"
 
 copy_runtime() {
     src=$1

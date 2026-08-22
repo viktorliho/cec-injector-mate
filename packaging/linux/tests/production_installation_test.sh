@@ -7,7 +7,9 @@ fixture=$(mktemp -d)
 trap 'rm -rf -- "$fixture"' EXIT
 bundle=$fixture/bundle
 root=$fixture/root
-mkdir -p "$bundle/bin" "$bundle/lib" "$root"
+mkdir -p "$bundle/bin" "$bundle/lib" "$bundle/share/icons/hicolor" "$root"
+cp -a "$source_root/applications/gui/resources/icon/hicolor/." \
+  "$bundle/share/icons/hicolor/"
 printf '#!/bin/sh\nexit 0\n' >"$bundle/bin/cec-injector-mate"
 printf '#!/bin/sh\nexit 0\n' >"$bundle/bin/cec-injector-mate-gui"
 chmod 0755 "$bundle/bin/cec-injector-mate" "$bundle/bin/cec-injector-mate-gui"
@@ -41,6 +43,7 @@ readiness=$root/opt/cec-injector-mate/current/libexec/readiness
 frontend_health=$root/opt/cec-injector-mate/current/libexec/frontend-health
 dbus_policy=$root/etc/dbus-1/system.d/org.cecinjector.Mate.conf
 launcher=$desktop_home/.local/share/applications/cec-injector-mate.desktop
+icon_root=$desktop_home/.local/share/icons/hicolor
 test -x "$root/opt/cec-injector-mate/current/bin/cec-injector-mate-gui"
 test -x "$frontend_health"
 grep -Fq 'GetStatus' "$frontend_health"
@@ -50,6 +53,13 @@ grep -Fq 'send_member="SetConfiguration"' "$dbus_policy"
 grep -Fq 'group="wheel"' "$dbus_policy"
 test -f "$launcher"
 grep -Fq 'Exec=/opt/cec-injector-mate/current/bin/cec-injector-mate-gui' "$launcher"
+grep -Fq 'Icon=cec-injector-mate' "$launcher"
+for size in 16 32 48 64 128 256 512; do
+  installed_icon="$icon_root/${size}x${size}/apps/cec-injector-mate.png"
+  source_icon="$bundle/share/icons/hicolor/${size}x${size}/apps/cec-injector-mate.png"
+  test -f "$installed_icon"
+  cmp "$source_icon" "$installed_icon"
+done
 grep -Fq 'CEC_MATE_DESKTOP_USER=deck' \
   "$root/etc/cec-injector-mate/installation.conf"
 grep -Fq 'Qt 6.4-compatible runtime is unavailable' "$packaging/install.sh"
@@ -216,6 +226,9 @@ test -e "$root/var/lib/cec-injector-mate"
 test -e "$root/etc/cec-injector-mate/runtime/config.conf"
 test ! -e "$dbus_policy"
 test ! -e "$launcher"
+for size in 16 32 48 64 128 256 512; do
+  test ! -e "$icon_root/${size}x${size}/apps/cec-injector-mate.png"
+done
 
 # A previous CLI-based daily driver migrates every mutable policy bit before
 # its unit is replaced. Existing runtime configuration remains authoritative.

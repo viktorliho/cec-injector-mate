@@ -23,7 +23,7 @@ echo "$patch_sha  /mate/third_party/libcec/libcec-7.1.1-project-adapter-v1.patch
 rm -rf /work /out/bundle
 rm -f /out/cec-injector-mate-bundle.tar.zst /out/SHA256SUMS \
   /out/exported-symbol.txt
-mkdir -p /work /out/bundle/bin /out/bundle/lib
+mkdir -p /work /out/bundle/bin /out/bundle/lib /out/bundle/share/icons/hicolor
 git clone --quiet --no-hardlinks /libcec-upstream /work/libcec
 git -C /work/libcec reset --hard "$libcec_commit"
 rm -rf /work/libcec/src/platform
@@ -51,6 +51,8 @@ LD_LIBRARY_PATH=/work/prefix/lib ctest --test-dir /work/mate-build --output-on-f
 install -m 0755 /work/mate-build/cec-injector-mate /out/bundle/bin/
 install -m 0755 /work/mate-build/applications/gui/cec-injector-mate-gui \
   /out/bundle/bin/
+cp -a /mate/applications/gui/resources/icon/hicolor/. \
+  /out/bundle/share/icons/hicolor/
 install -m 0644 /work/prefix/lib/libcec.so.7 /out/bundle/lib/
 install -m 0644 /work/prefix/lib/libp8-platform.so.2 /out/bundle/lib/
 patchelf --set-rpath '$ORIGIN/../lib' /out/bundle/bin/cec-injector-mate

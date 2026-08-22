@@ -1,4 +1,5 @@
 #include <QApplication>
+#include <QIcon>
 
 #include <memory>
 
@@ -13,6 +14,8 @@
 
 int main(int argc, char** argv) {
   QApplication application(argc, argv);
+  application.setWindowIcon(
+      QIcon(QStringLiteral(":/cec-injector/mate/cec-injector-mate.png")));
   const bool fake = application.arguments().contains(QStringLiteral("--fake-backend"));
   std::unique_ptr<cec_injector::mate::frontend::MateFrontendBackend> backend;
 #if defined(CEC_INJECTOR_MATE_GUI_MACOS_IN_PROCESS)

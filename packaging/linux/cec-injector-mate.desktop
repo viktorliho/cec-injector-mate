@@ -4,4 +4,5 @@ Name=CEC Injector
 Comment=Configure and inspect CEC Injector Mate
 Exec=/opt/cec-injector-mate/current/bin/cec-injector-mate-gui
 Terminal=false
+Icon=cec-injector-mate
 Categories=Settings;HardwareSettings;

@@ -27,6 +27,9 @@ test -d "$bundle/bin" && test -x "$bundle/bin/cec-injector-mate" || {
 test -x "$bundle/bin/cec-injector-mate-gui" || {
   echo "invalid Mate bundle: GUI executable missing" >&2; exit 1;
 }
+test -f "$bundle/share/icons/hicolor/256x256/apps/cec-injector-mate.png" || {
+  echo "invalid Mate bundle: application icon missing" >&2; exit 1;
+}
 test -f "$bundle/MANIFEST.txt" || { echo "bundle manifest is required" >&2; exit 1; }
 test -z "$root" || test "${root#/}" != "$root" || { echo "CEC_MATE_ROOT must be absolute" >&2; exit 2; }
 if test -z "$root"; then
@@ -238,6 +241,16 @@ if test -n "$desktop_home"; then
     chown "$desktop_user:$desktop_user" \
       "$desktop_home/.local/share/applications/cec-injector-mate.desktop"
   fi
+  for icon in "$bundle"/share/icons/hicolor/*/apps/cec-injector-mate.png; do
+    size=$(basename "$(dirname "$(dirname "$icon")")")
+    icon_dir="$desktop_home/.local/share/icons/hicolor/$size/apps"
+    install -d -m 0755 "$icon_dir"
+    install -m 0644 "$icon" "$icon_dir/cec-injector-mate.png"
+    if test -z "$root"; then
+      chown -R "$desktop_user:$desktop_user" \
+        "$desktop_home/.local/share/icons/hicolor/$size"
+    fi
+  done
 fi
 
 executable=/opt/cec-injector-mate/current/bin/cec-injector-mate
