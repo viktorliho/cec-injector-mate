@@ -1,5 +1,37 @@
 set(CMAKE_AUTOMOC ON)
 
+set(CEC_INJECTOR_MATE_GUI_GIT_SHORT_HASH "unknown")
+set(CEC_INJECTOR_MATE_GUI_GIT_HASH "unknown")
+set(CEC_INJECTOR_MATE_GUI_BUNDLE_VERSION "0")
+set(CEC_INJECTOR_MATE_GUI_BUNDLE_SHORT_VERSION "0.0.0")
+set(CEC_INJECTOR_MATE_GUI_MINIMUM_SYSTEM_VERSION "13.0")
+if(APPLE)
+    execute_process(
+        COMMAND git -C ${PROJECT_SOURCE_DIR} rev-parse --short=12 HEAD
+        OUTPUT_VARIABLE CEC_INJECTOR_MATE_GUI_GIT_SHORT_HASH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    execute_process(
+        COMMAND git -C ${PROJECT_SOURCE_DIR} rev-parse HEAD
+        OUTPUT_VARIABLE CEC_INJECTOR_MATE_GUI_GIT_HASH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    execute_process(
+        COMMAND git -C ${PROJECT_SOURCE_DIR} rev-list --count HEAD
+        OUTPUT_VARIABLE CEC_INJECTOR_MATE_GUI_BUNDLE_VERSION
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    set(CEC_INJECTOR_MATE_GUI_BUNDLE_SHORT_VERSION
+        "0.0.${CEC_INJECTOR_MATE_GUI_BUNDLE_VERSION}")
+    if(CMAKE_OSX_DEPLOYMENT_TARGET)
+        set(CEC_INJECTOR_MATE_GUI_MINIMUM_SYSTEM_VERSION
+            "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    endif()
+endif()
+
 add_library(cec_injector_mate_gui_support
     include/cec_injector/mate/gui/backend_qt_bridge.h
     include/cec_injector/mate/gui/cec_monitor_model.h
@@ -41,6 +73,26 @@ endif()
 add_executable(cec-injector-mate-gui src/main.cpp)
 target_link_libraries(cec-injector-mate-gui PRIVATE
     cec_injector_mate_gui_support)
+if(APPLE)
+    set_target_properties(cec-injector-mate-gui PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_INFO_PLIST
+            ${CMAKE_CURRENT_SOURCE_DIR}/platforms/macos/Info.plist.in
+        MACOSX_BUNDLE_BUNDLE_NAME "CEC Injector Mate"
+        MACOSX_BUNDLE_BUNDLE_VERSION
+            ${CEC_INJECTOR_MATE_GUI_BUNDLE_VERSION}
+        MACOSX_BUNDLE_COPYRIGHT "Copyright (c) CEC Injector contributors"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "org.cecinjector.Mate"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING
+            ${CEC_INJECTOR_MATE_GUI_BUNDLE_SHORT_VERSION}
+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "org.cecinjector.Mate"
+        XCODE_ATTRIBUTE_MARKETING_VERSION
+            ${CEC_INJECTOR_MATE_GUI_BUNDLE_SHORT_VERSION}
+        XCODE_ATTRIBUTE_CURRENT_PROJECT_VERSION
+            ${CEC_INJECTOR_MATE_GUI_BUNDLE_SHORT_VERSION}
+        BUILD_RPATH "@executable_path/../Frameworks"
+        INSTALL_RPATH "@executable_path/../Frameworks")
+endif()
 
 if(BUILD_TESTING)
     add_executable(mate-gui-tests tests/gui_test.cpp)

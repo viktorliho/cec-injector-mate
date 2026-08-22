@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>CEC Injector Mate</string>
+    <key>CFBundleExecutable</key>
+    <string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+    <key>CFBundleIdentifier</key>
+    <string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
+    <key>CFBundleVersion</key>
+    <string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
+    <key>CECInjectorGitRevision</key>
+    <string>${CEC_INJECTOR_MATE_GUI_GIT_HASH}</string>
+    <key>CECInjectorGitShortRevision</key>
+    <string>${CEC_INJECTOR_MATE_GUI_GIT_SHORT_HASH}</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>${CEC_INJECTOR_MATE_GUI_MINIMUM_SYSTEM_VERSION}</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>
