@@ -80,6 +80,10 @@
 
 - [00:00.400] TV switched physically
 
+## Guided Tests
+
+- No guided tests recorded
+
 ## Compatibility Summary
 
 - Final session state: Disconnected

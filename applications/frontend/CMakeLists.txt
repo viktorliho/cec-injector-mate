@@ -2,6 +2,7 @@ add_library(cec_injector_mate_frontend
     src/compatibility_capture.cpp
     src/fake_frontend_backend.cpp
     src/frontend_state_projector.cpp
+    src/guided_compatibility_test.cpp
 )
 add_library(CECInjector::MateFrontend ALIAS cec_injector_mate_frontend)
 
@@ -32,4 +33,11 @@ if(BUILD_TESTING)
         MATE_FRONTEND_TESTS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
     add_test(NAME mate-compatibility-capture COMMAND
         mate-compatibility-capture-tests)
+    add_executable(mate-guided-compatibility-tests
+        tests/guided_compatibility_test.cpp)
+    target_link_libraries(mate-guided-compatibility-tests PRIVATE
+        CECInjector::MateFrontend)
+    target_compile_features(mate-guided-compatibility-tests PRIVATE cxx_std_20)
+    add_test(NAME mate-guided-compatibility COMMAND
+        mate-guided-compatibility-tests)
 endif()

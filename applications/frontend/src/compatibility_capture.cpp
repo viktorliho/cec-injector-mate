@@ -326,6 +326,41 @@ std::string compatibility_physical_result_name(
   return "Unknown";
 }
 
+std::string compatibility_guided_test_scenario_name(
+    CompatibilityGuidedTestScenario scenario) {
+  switch (scenario) {
+    case CompatibilityGuidedTestScenario::ActiveSource:
+      return "Active Source";
+    case CompatibilityGuidedTestScenario::StandbyPowerOn:
+      return "Standby + Power On";
+    case CompatibilityGuidedTestScenario::UsbReconnect:
+      return "USB Reconnect";
+    case CompatibilityGuidedTestScenario::HdmiReconnect:
+      return "HDMI / Display Reconnect";
+  }
+  return "Unknown";
+}
+
+std::string compatibility_guided_test_outcome_name(
+    CompatibilityGuidedTestOutcome outcome) {
+  switch (outcome) {
+    case CompatibilityGuidedTestOutcome::Completed: return "Completed";
+    case CompatibilityGuidedTestOutcome::Failed: return "Failed";
+    case CompatibilityGuidedTestOutcome::Inconclusive: return "Inconclusive";
+    case CompatibilityGuidedTestOutcome::Cancelled: return "Cancelled";
+  }
+  return "Unknown";
+}
+
+std::string compatibility_guided_observation_source_name(
+    CompatibilityGuidedObservationSource source) {
+  switch (source) {
+    case CompatibilityGuidedObservationSource::Automatic: return "Automatic";
+    case CompatibilityGuidedObservationSource::User: return "User";
+  }
+  return "Unknown";
+}
+
 CompatibilityCaptureCounts CompatibilityCapture::counts() const noexcept {
   return {.retained_cec_events = cec_events_.size(),
           .total_cec_events = received_cec_events_ + transmitted_cec_events_,
@@ -393,6 +428,7 @@ void CompatibilityCapture::clear() noexcept {
   status_transitions_.clear();
   markers_.clear();
   notes_.clear();
+  guided_tests_.clear();
   dropped_cec_events_ = 0;
   received_cec_events_ = 0;
   transmitted_cec_events_ = 0;
@@ -485,6 +521,17 @@ void CompatibilityCapture::record_note(std::string text, TimePoint now) {
   if (clean.empty()) return;
   notes_.push_back(
       {.sequence = next_sequence_++, .timestamp = now, .text = clean});
+}
+
+void CompatibilityCapture::upsert_guided_test(
+    CompatibilityGuidedTestRecord record) {
+  if (state_ != CompatibilityCaptureState::Capturing) return;
+  for (auto& existing : guided_tests_) {
+    if (existing.test_id != record.test_id) continue;
+    existing = std::move(record);
+    return;
+  }
+  guided_tests_.push_back(std::move(record));
 }
 
 std::vector<std::string> CompatibilityCapture::recent_timeline_lines(
@@ -652,6 +699,71 @@ CompatibilityCaptureExport CompatibilityCapture::build_export(
   }
   markdown << '\n';
 
+  markdown << "## Guided Tests\n\n";
+  if (guided_tests_.empty()) {
+    markdown << "- No guided tests recorded\n";
+  } else {
+    for (const auto& test : guided_tests_) {
+      markdown << "### "
+               << compatibility_guided_test_scenario_name(test.scenario)
+               << "\n\n";
+      markdown << "- Outcome: "
+               << compatibility_guided_test_outcome_name(test.outcome) << '\n';
+      markdown << "- Started: " << TimestampString(test.started_at) << '\n';
+      markdown << "- Completed: "
+               << (test.completed_at ? TimestampString(*test.completed_at)
+                                     : std::string{"InProgress"})
+               << '\n';
+      markdown << "- Display: " << MarkdownText(test.display_name) << '\n';
+      if (!test.reason.empty()) {
+        markdown << "- Reason: " << MarkdownText(test.reason) << '\n';
+      }
+      if (!test.related_action_request_ids.empty()) {
+        markdown << "- Related actions:";
+        for (const auto request_id : test.related_action_request_ids) {
+          markdown << ' ' << '#' << request_id;
+        }
+        markdown << '\n';
+      }
+      if (!test.steps.empty()) {
+        markdown << "- Steps:\n";
+        for (const auto& step : test.steps) {
+          markdown << "  - Step " << step.index << ": "
+                   << MarkdownText(step.title) << " ["
+                   << MarkdownText(step.state) << "]\n";
+          if (step.action_completion) {
+            markdown << "    backend: "
+                     << OperationResultName(step.action_completion->result)
+                     << ", " << step.action_completion->duration.count()
+                     << " ms\n";
+          }
+          if (step.physical_result) {
+            markdown << "    physical: "
+                     << compatibility_physical_result_name(*step.physical_result);
+            if (!step.physical_note.empty()) {
+              markdown << " — " << MarkdownText(step.physical_note);
+            }
+            markdown << '\n';
+          }
+        }
+      }
+      if (!test.observations.empty()) {
+        markdown << "- Evidence:\n";
+        for (const auto& observation : test.observations) {
+          markdown << "  - ["
+                   << RelativeTimestamp(*started_at_, observation.timestamp)
+                   << "] "
+                   << compatibility_guided_observation_source_name(
+                          observation.source)
+                   << ' ' << MarkdownText(observation.kind) << ": "
+                   << MarkdownText(observation.detail) << '\n';
+        }
+      }
+      markdown << '\n';
+    }
+  }
+  markdown << '\n';
+
   markdown << "## Compatibility Summary\n\n";
   markdown << "- Final session state: " << SessionName(final_status.session_state)
            << '\n';
@@ -676,6 +788,15 @@ CompatibilityCaptureExport CompatibilityCapture::build_export(
       }
       markdown << '\n';
     }
+  }
+  for (const auto& test : guided_tests_) {
+    markdown << "- "
+             << compatibility_guided_test_scenario_name(test.scenario) << ": "
+             << compatibility_guided_test_outcome_name(test.outcome);
+    if (!test.reason.empty()) {
+      markdown << " (" << MarkdownText(test.reason) << ')';
+    }
+    markdown << '\n';
   }
 
   std::ostringstream json;
@@ -928,6 +1049,121 @@ CompatibilityCaptureExport CompatibilityCapture::build_export(
     json << "    {\"timestamp\": " << JsonString(TimestampString(note.timestamp))
          << ", \"text\": " << JsonString(note.text) << "}";
     if (i + 1 != notes_.size()) json << ',';
+    json << '\n';
+  }
+  json << "  ],\n";
+
+  json << "  \"guided_tests\": [\n";
+  for (std::size_t i = 0; i < guided_tests_.size(); ++i) {
+    const auto& test = guided_tests_[i];
+    json << "    {\n";
+    json << "      \"test_id\": " << JsonString(test.test_id) << ",\n";
+    json << "      \"scenario\": "
+         << JsonString(compatibility_guided_test_scenario_name(test.scenario))
+         << ",\n";
+    json << "      \"display_name\": " << JsonString(test.display_name)
+         << ",\n";
+    json << "      \"started_at\": " << JsonString(TimestampString(test.started_at))
+         << ",\n";
+    json << "      \"completed_at\": "
+         << (test.completed_at ? JsonString(TimestampString(*test.completed_at))
+                               : "null")
+         << ",\n";
+    json << "      \"outcome\": "
+         << JsonString(compatibility_guided_test_outcome_name(test.outcome))
+         << ",\n";
+    json << "      \"reason\": " << JsonString(test.reason) << ",\n";
+    json << "      \"related_action_request_ids\": [";
+    for (std::size_t j = 0; j < test.related_action_request_ids.size(); ++j) {
+      if (j != 0) json << ", ";
+      json << test.related_action_request_ids[j];
+    }
+    json << "],\n";
+    json << "      \"steps\": [\n";
+    for (std::size_t j = 0; j < test.steps.size(); ++j) {
+      const auto& step = test.steps[j];
+      json << "        {\n";
+      json << "          \"index\": " << step.index << ",\n";
+      json << "          \"title\": " << JsonString(step.title) << ",\n";
+      json << "          \"instruction\": " << JsonString(step.instruction)
+           << ",\n";
+      json << "          \"state\": " << JsonString(step.state) << ",\n";
+      json << "          \"started_at\": "
+           << JsonString(TimestampString(step.started_at)) << ",\n";
+      json << "          \"completed_at\": "
+           << (step.completed_at ? JsonString(TimestampString(*step.completed_at))
+                                 : "null")
+           << ",\n";
+      json << "          \"action_request_id\": "
+           << (step.action_request_id
+                   ? std::to_string(*step.action_request_id)
+                   : "null")
+           << ",\n";
+      json << "          \"action_result\": "
+           << (step.action_completion
+                   ? JsonString(
+                         OperationResultName(step.action_completion->result))
+                   : "null")
+           << ",\n";
+      json << "          \"action_duration_ms\": "
+           << (step.action_completion
+                   ? std::to_string(step.action_completion->duration.count())
+                   : "null")
+           << ",\n";
+      json << "          \"physical_result\": "
+           << (step.physical_result
+                   ? JsonString(
+                         compatibility_physical_result_name(*step.physical_result))
+                   : "null")
+           << ",\n";
+      json << "          \"physical_note\": "
+           << JsonString(step.physical_note) << "\n";
+      json << "        }";
+      if (j + 1 != test.steps.size()) json << ',';
+      json << '\n';
+    }
+    json << "      ],\n";
+    json << "      \"observations\": [\n";
+    for (std::size_t j = 0; j < test.observations.size(); ++j) {
+      const auto& observation = test.observations[j];
+      json << "        {\n";
+      json << "          \"timestamp\": "
+           << JsonString(TimestampString(observation.timestamp)) << ",\n";
+      json << "          \"source\": "
+           << JsonString(compatibility_guided_observation_source_name(
+                  observation.source))
+           << ",\n";
+      json << "          \"kind\": " << JsonString(observation.kind) << ",\n";
+      json << "          \"detail\": " << JsonString(observation.detail)
+           << ",\n";
+      json << "          \"request_id\": "
+           << (observation.request_id ? std::to_string(*observation.request_id)
+                                      : "null")
+           << "\n";
+      json << "        }";
+      if (j + 1 != test.observations.size()) json << ',';
+      json << '\n';
+    }
+    json << "      ],\n";
+    json << "      \"physical_confirmations\": [\n";
+    for (std::size_t j = 0; j < test.physical_confirmations.size(); ++j) {
+      const auto& confirmation = test.physical_confirmations[j];
+      json << "        {\n";
+      json << "          \"timestamp\": "
+           << JsonString(TimestampString(confirmation.timestamp)) << ",\n";
+      json << "          \"request_id\": " << confirmation.request_id << ",\n";
+      json << "          \"result\": "
+           << JsonString(
+                  compatibility_physical_result_name(confirmation.result))
+           << ",\n";
+      json << "          \"note\": " << JsonString(confirmation.note) << "\n";
+      json << "        }";
+      if (j + 1 != test.physical_confirmations.size()) json << ',';
+      json << '\n';
+    }
+    json << "      ]\n";
+    json << "    }";
+    if (i + 1 != guided_tests_.size()) json << ',';
     json << '\n';
   }
   json << "  ],\n";

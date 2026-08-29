@@ -8,6 +8,7 @@
 
 #include "cec_injector/mate/frontend/compatibility_capture.h"
 #include "cec_injector/mate/frontend/frontend_backend.h"
+#include "cec_injector/mate/frontend/guided_compatibility_test.h"
 
 class QLabel;
 class QCheckBox;
@@ -18,6 +19,7 @@ class QListWidget;
 class QListWidgetItem;
 class QStackedWidget;
 class QTimer;
+class QTextEdit;
 
 namespace cec_injector::mate::gui {
 
@@ -68,6 +70,16 @@ class MainWindow final : public QMainWindow {
   void promptCompatibilityNote();
   void exportCompatibilityCapture();
   void recordPhysicalResult(frontend::CompatibilityPhysicalResult result);
+  void renderGuidedCompatibilityTest();
+  void startGuidedCompatibilityTest();
+  void guidedPrimary();
+  void guidedSecondary();
+  void guidedTertiary();
+  void guidedBack();
+  void guidedCancel();
+  void guidedPhysicalResult(frontend::CompatibilityPhysicalResult result);
+  void syncGuidedTestCapture(bool add_marker);
+  void startCompatibilityCaptureIfNeeded();
 
   std::unique_ptr<frontend::MateFrontendBackend> backend_;
   std::unique_ptr<BackendQtBridge> bridge_;
@@ -95,6 +107,12 @@ class MainWindow final : public QMainWindow {
   QLabel* capture_marker_count_value_{};
   QLabel* capture_dropped_count_value_{};
   QLabel* capture_physical_prompt_value_{};
+  QLabel* guided_test_title_value_{};
+  QLabel* guided_test_description_value_{};
+  QLabel* guided_test_state_value_{};
+  QLabel* guided_test_step_value_{};
+  QLabel* guided_test_instruction_value_{};
+  QLabel* guided_test_detail_value_{};
   QPushButton* power_on_action_{};
   QPushButton* active_source_action_{};
   QPushButton* standby_action_{};
@@ -107,6 +125,15 @@ class MainWindow final : public QMainWindow {
   QPushButton* physical_worked_action_{};
   QPushButton* physical_failed_action_{};
   QPushButton* physical_not_checked_action_{};
+  QPushButton* start_guided_test_action_{};
+  QPushButton* guided_primary_action_{};
+  QPushButton* guided_secondary_action_{};
+  QPushButton* guided_tertiary_action_{};
+  QPushButton* guided_back_action_{};
+  QPushButton* guided_cancel_action_{};
+  QPushButton* guided_physical_worked_action_{};
+  QPushButton* guided_physical_failed_action_{};
+  QPushButton* guided_physical_not_checked_action_{};
   QLabel* configuration_result_{};
   QCheckBox* power_on_boot_{};
   QCheckBox* power_on_resume_{};
@@ -119,11 +146,14 @@ class MainWindow final : public QMainWindow {
   QPushButton* apply_configuration_{};
   QPushButton* reset_configuration_{};
   QComboBox* capture_marker_selector_{};
+  QComboBox* guided_test_selector_{};
   QLineEdit* capture_physical_note_{};
+  QLineEdit* guided_physical_note_{};
   QListWidget* capture_timeline_{};
   QTimer* capture_timer_{};
   frontend::FrontendConfigurationSnapshot authoritative_configuration_;
   frontend::CompatibilityCapture compatibility_capture_;
+  frontend::GuidedCompatibilityTestSession guided_test_;
   std::optional<frontend::FrontendActionRequestId>
       capture_pending_physical_request_;
   bool configuration_dirty_{};

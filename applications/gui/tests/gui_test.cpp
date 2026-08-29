@@ -1,5 +1,6 @@
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -345,5 +346,66 @@ int main(int argc, char** argv) {
     Check(state->text() == "Idle" && action_count->text() == "0" &&
               !export_button->isEnabled(),
           "clear resets local capture state");
+  }
+
+  {
+    auto backend = std::make_unique<ControlledBackend>();
+    auto* control = backend.get();
+    cec_injector::mate::gui::MainWindow guided_window(std::move(backend));
+    FlushEvents(application);
+    auto* toggle = guided_window.findChild<QCheckBox*>("labModeToggle");
+    toggle->setChecked(true);
+    FlushEvents(application);
+    auto* selector = guided_window.findChild<QComboBox*>("guidedTestSelector");
+    auto* start = guided_window.findChild<QPushButton*>("startGuidedTest");
+    auto* primary = guided_window.findChild<QPushButton*>("guidedPrimary");
+    auto* state = guided_window.findChild<QLabel*>("guidedTestState");
+    auto* step = guided_window.findChild<QLabel*>("guidedTestStep");
+    auto* physical_note =
+        guided_window.findChild<QLineEdit*>("guidedPhysicalNote");
+    auto* physical_worked =
+        guided_window.findChild<QPushButton*>("guidedPhysicalWorked");
+    auto* physical_failed =
+        guided_window.findChild<QPushButton*>("guidedPhysicalFailed");
+    Check(selector && start && primary && state && step && physical_note &&
+              physical_worked && physical_failed,
+          "guided test controls exist");
+
+    selector->setCurrentIndex(4);
+    FlushEvents(application);
+    Check(!start->isEnabled(), "remote control remains manual");
+    selector->setCurrentIndex(0);
+    FlushEvents(application);
+    Check(start->isEnabled(), "guided active source can start");
+    start->click();
+    FlushEvents(application);
+    Check(state->text() == "WaitingForUser", "guided test started");
+    Check(control->action_requests == 0, "guided test start sends no action");
+
+    primary->click();
+    FlushEvents(application);
+    Check(primary->text().contains("Send Make Active Source"),
+          "guided test requires explicit send step");
+    Check(control->action_requests == 0, "continue still sends no action");
+
+    primary->click();
+    FlushEvents(application);
+    Check(control->action_requests == 1 &&
+              control->last_action == FrontendAction::MakeActiveSource,
+          "guided explicit send uses normal action path once");
+    control->completeAction(
+        71, {.action = FrontendAction::MakeActiveSource,
+             .result = OperationResult::Timeout,
+             .duration = std::chrono::milliseconds(2500),
+             .message = "timed out"});
+    FlushEvents(application);
+    Check(!physical_worked->isHidden() && physical_worked->isEnabled(),
+          "guided physical confirmation is separate from backend result");
+    physical_note->setText("TV switched");
+    physical_worked->click();
+    FlushEvents(application);
+    Check(state->text() == "Completed", "guided active source completes");
+    Check(start->isEnabled(), "finished guided test allows next scenario");
+    Check(step->text() == "3 / 3", "guided step counter rendered");
   }
 }

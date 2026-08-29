@@ -113,6 +113,8 @@
   "notes": [
     {"timestamp": "2024-08-29T00:00:00.400Z", "text": "TV switched physically"}
   ],
+  "guided_tests": [
+  ],
   "counters": {
     "rx_events": 1,
     "tx_events": 1,

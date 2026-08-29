@@ -16,6 +16,19 @@ namespace cec_injector::mate::frontend {
 enum class CompatibilityCaptureState { Idle, Capturing, Completed };
 
 enum class CompatibilityPhysicalResult { Unknown, Worked, Failed, NotChecked };
+enum class CompatibilityGuidedTestScenario {
+  ActiveSource,
+  StandbyPowerOn,
+  UsbReconnect,
+  HdmiReconnect,
+};
+enum class CompatibilityGuidedTestOutcome {
+  Completed,
+  Failed,
+  Inconclusive,
+  Cancelled,
+};
+enum class CompatibilityGuidedObservationSource { Automatic, User };
 
 struct CompatibilityCaptureApplicationInfo {
   std::string application_name;
@@ -67,6 +80,52 @@ struct CompatibilityCaptureActionRecord {
   std::string physical_note;
 };
 
+struct CompatibilityGuidedTestStepRecord {
+  std::size_t index{};
+  std::string title;
+  std::string instruction;
+  std::string state;
+  std::chrono::system_clock::time_point started_at;
+  std::optional<std::chrono::system_clock::time_point> completed_at;
+  std::optional<FrontendActionRequestId> action_request_id;
+  std::optional<FrontendActionResult> action_completion;
+  std::optional<CompatibilityPhysicalResult> physical_result;
+  std::string physical_note;
+};
+
+struct CompatibilityGuidedTestObservation {
+  std::chrono::system_clock::time_point timestamp;
+  CompatibilityGuidedObservationSource source{
+      CompatibilityGuidedObservationSource::Automatic};
+  std::string kind;
+  std::string detail;
+  std::optional<FrontendActionRequestId> request_id;
+};
+
+struct CompatibilityGuidedTestPhysicalConfirmation {
+  std::chrono::system_clock::time_point timestamp;
+  FrontendActionRequestId request_id{};
+  CompatibilityPhysicalResult result{CompatibilityPhysicalResult::Unknown};
+  std::string note;
+};
+
+struct CompatibilityGuidedTestRecord {
+  std::string test_id;
+  CompatibilityGuidedTestScenario scenario{
+      CompatibilityGuidedTestScenario::ActiveSource};
+  std::string display_name;
+  std::chrono::system_clock::time_point started_at;
+  std::optional<std::chrono::system_clock::time_point> completed_at;
+  CompatibilityGuidedTestOutcome outcome{
+      CompatibilityGuidedTestOutcome::Inconclusive};
+  std::string reason;
+  std::vector<CompatibilityGuidedTestStepRecord> steps;
+  std::vector<CompatibilityGuidedTestObservation> observations;
+  std::vector<CompatibilityGuidedTestPhysicalConfirmation>
+      physical_confirmations;
+  std::vector<FrontendActionRequestId> related_action_request_ids;
+};
+
 struct CompatibilityCaptureExport {
   std::string suggested_basename;
   std::string markdown;
@@ -97,6 +156,10 @@ class CompatibilityCapture final {
   [[nodiscard]] const CompatibilityCaptureApplicationInfo* application() const
       noexcept {
     return application_ ? &*application_ : nullptr;
+  }
+  [[nodiscard]] const std::vector<CompatibilityGuidedTestRecord>&
+  guided_tests() const noexcept {
+    return guided_tests_;
   }
   [[nodiscard]] const std::optional<std::chrono::system_clock::time_point>&
   started_at() const noexcept {
@@ -135,6 +198,7 @@ class CompatibilityCapture final {
       std::string note, std::chrono::system_clock::time_point now);
   void record_marker(std::string name, std::chrono::system_clock::time_point now);
   void record_note(std::string text, std::chrono::system_clock::time_point now);
+  void upsert_guided_test(CompatibilityGuidedTestRecord record);
 
   [[nodiscard]] std::vector<std::string> recent_timeline_lines(
       std::size_t limit = kRecentTimelineLimit) const;
@@ -167,6 +231,7 @@ class CompatibilityCapture final {
   std::vector<CompatibilityCaptureStatusTransition> status_transitions_;
   std::vector<CompatibilityCaptureMarker> markers_;
   std::vector<CompatibilityCaptureNote> notes_;
+  std::vector<CompatibilityGuidedTestRecord> guided_tests_;
   std::size_t dropped_cec_events_{};
   std::size_t received_cec_events_{};
   std::size_t transmitted_cec_events_{};
@@ -179,5 +244,11 @@ class CompatibilityCapture final {
     CompatibilityCaptureState state);
 [[nodiscard]] std::string compatibility_physical_result_name(
     CompatibilityPhysicalResult result);
+[[nodiscard]] std::string compatibility_guided_test_scenario_name(
+    CompatibilityGuidedTestScenario scenario);
+[[nodiscard]] std::string compatibility_guided_test_outcome_name(
+    CompatibilityGuidedTestOutcome outcome);
+[[nodiscard]] std::string compatibility_guided_observation_source_name(
+    CompatibilityGuidedObservationSource source);
 
 }  // namespace cec_injector::mate::frontend

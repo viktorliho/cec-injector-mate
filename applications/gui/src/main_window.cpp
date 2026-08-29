@@ -78,6 +78,11 @@ QString CaptureStateName(frontend::CompatibilityCaptureState state) {
       frontend::compatibility_capture_state_name(state));
 }
 
+QString GuidedTestStateName(frontend::GuidedCompatibilityTestState state) {
+  return QString::fromStdString(
+      frontend::guided_compatibility_test_state_name(state));
+}
+
 frontend::CompatibilityCaptureApplicationInfo CaptureApplicationInfo() {
   frontend::CompatibilityCaptureApplicationInfo info;
   info.application_name = "CEC Injector Mate";
@@ -104,6 +109,14 @@ frontend::CompatibilityCaptureApplicationInfo CaptureApplicationInfo() {
 QString DefaultExportPath(const std::string& basename) {
   return QDir::current().filePath(QString::fromStdString(basename) +
                                   QStringLiteral(".md"));
+}
+
+std::optional<frontend::CompatibilityGuidedTestScenario> SelectedGuidedScenario(
+    const QComboBox* combo) {
+  if (!combo) return std::nullopt;
+  const auto value = combo->currentData().toInt();
+  if (value < 0) return std::nullopt;
+  return static_cast<frontend::CompatibilityGuidedTestScenario>(value);
 }
 
 }  // namespace
@@ -142,7 +155,12 @@ MainWindow::MainWindow(std::unique_ptr<frontend::MateFrontendBackend> backend,
   capture_timer_ = new QTimer(this);
   capture_timer_->setInterval(250);
   connect(capture_timer_, &QTimer::timeout, this,
-          &MainWindow::renderCompatibilityCapture);
+          [this] {
+            guided_test_.tick(std::chrono::system_clock::now());
+            syncGuidedTestCapture(false);
+            renderCompatibilityCapture();
+            renderGuidedCompatibilityTest();
+          });
   capture_timer_->start();
 
   bridge_ = std::make_unique<BackendQtBridge>(*backend_);
@@ -150,8 +168,11 @@ MainWindow::MainWindow(std::unique_ptr<frontend::MateFrontendBackend> backend,
           [this](const frontend::FrontendStatus& status) {
             compatibility_capture_.record_status_transition(
                 status, std::chrono::system_clock::now());
+            guided_test_.on_status(status, std::chrono::system_clock::now());
+            syncGuidedTestCapture(false);
             renderStatus(status);
             renderCompatibilityCapture();
+            renderGuidedCompatibilityTest();
           });
   connect(bridge_.get(), &BackendQtBridge::cecEventReceived, this,
           [this](const frontend::FrontendCecEvent& event) {
@@ -182,7 +203,11 @@ MainWindow::MainWindow(std::unique_ptr<frontend::MateFrontendBackend> backend,
                 compatibility_capture_.latest_action_needing_physical_result();
             capture_pending_physical_request_ =
                 pending ? std::optional{pending->request_id} : std::nullopt;
+            guided_test_.on_action_completed(request, value,
+                                             std::chrono::system_clock::now());
+            syncGuidedTestCapture(false);
             renderCompatibilityCapture();
+            renderGuidedCompatibilityTest();
           });
   connect(bridge_.get(), &BackendQtBridge::configurationChanged, this,
           &MainWindow::renderConfiguration);
@@ -191,6 +216,7 @@ MainWindow::MainWindow(std::unique_ptr<frontend::MateFrontendBackend> backend,
   renderConfiguration(backend_->configuration());
   renderStatus(backend_->status());
   renderCompatibilityCapture();
+  renderGuidedCompatibilityTest();
 }
 
 MainWindow::~MainWindow() = default;
@@ -373,6 +399,7 @@ QWidget* MainWindow::createCommandsPage() {
         button->setEnabled(true);
         action_result_->setText(QStringLiteral("Request rejected"));
         renderCompatibilityCapture();
+        renderGuidedCompatibilityTest();
         return;
       }
       compatibility_capture_.record_action_requested(
@@ -489,6 +516,109 @@ QWidget* MainWindow::createTestsPage() {
   capture_timeline_->setObjectName(QStringLiteral("captureTimeline"));
   layout->addWidget(new QLabel(QStringLiteral("Recent timeline")));
   layout->addWidget(capture_timeline_, 1);
+
+  layout->addSpacing(12);
+  layout->addWidget(new QLabel(QStringLiteral("Guided Tests")));
+  auto* guided_summary = new QFormLayout;
+  guided_test_title_value_ = ValueLabel("guidedTestTitle");
+  guided_test_description_value_ = ValueLabel("guidedTestDescription");
+  guided_test_state_value_ = ValueLabel("guidedTestState");
+  guided_test_step_value_ = ValueLabel("guidedTestStep");
+  guided_summary->addRow(QStringLiteral("Selected"), guided_test_title_value_);
+  guided_summary->addRow(QStringLiteral("Description"),
+                         guided_test_description_value_);
+  guided_summary->addRow(QStringLiteral("State"), guided_test_state_value_);
+  guided_summary->addRow(QStringLiteral("Step"), guided_test_step_value_);
+  layout->addLayout(guided_summary);
+
+  guided_test_selector_ = new QComboBox;
+  guided_test_selector_->setObjectName(QStringLiteral("guidedTestSelector"));
+  guided_test_selector_->addItem(QStringLiteral("Active Source"),
+                                 static_cast<int>(frontend::CompatibilityGuidedTestScenario::ActiveSource));
+  guided_test_selector_->addItem(
+      QStringLiteral("Standby + Power On"),
+      static_cast<int>(frontend::CompatibilityGuidedTestScenario::StandbyPowerOn));
+  guided_test_selector_->addItem(
+      QStringLiteral("USB Reconnect"),
+      static_cast<int>(frontend::CompatibilityGuidedTestScenario::UsbReconnect));
+  guided_test_selector_->addItem(
+      QStringLiteral("HDMI / Display Reconnect"),
+      static_cast<int>(frontend::CompatibilityGuidedTestScenario::HdmiReconnect));
+  guided_test_selector_->addItem(QStringLiteral("Remote Control — Manual"), -1);
+  start_guided_test_action_ = new QPushButton(QStringLiteral("Start Test"));
+  start_guided_test_action_->setObjectName(QStringLiteral("startGuidedTest"));
+  connect(start_guided_test_action_, &QPushButton::clicked, this,
+          &MainWindow::startGuidedCompatibilityTest);
+  connect(guided_test_selector_, &QComboBox::currentIndexChanged, this,
+          &MainWindow::renderGuidedCompatibilityTest);
+  auto* guided_select_controls = new QHBoxLayout;
+  guided_select_controls->addWidget(guided_test_selector_, 1);
+  guided_select_controls->addWidget(start_guided_test_action_);
+  layout->addLayout(guided_select_controls);
+
+  guided_test_instruction_value_ = ValueLabel("guidedTestInstruction");
+  guided_test_detail_value_ = ValueLabel("guidedTestDetail");
+  layout->addWidget(guided_test_instruction_value_);
+  layout->addWidget(guided_test_detail_value_);
+
+  auto* guided_controls = new QHBoxLayout;
+  guided_back_action_ = new QPushButton(QStringLiteral("Back"));
+  guided_back_action_->setObjectName(QStringLiteral("guidedBack"));
+  guided_primary_action_ = new QPushButton(QStringLiteral("Continue"));
+  guided_primary_action_->setObjectName(QStringLiteral("guidedPrimary"));
+  guided_secondary_action_ = new QPushButton(QStringLiteral("Secondary"));
+  guided_secondary_action_->setObjectName(QStringLiteral("guidedSecondary"));
+  guided_tertiary_action_ = new QPushButton(QStringLiteral("Tertiary"));
+  guided_tertiary_action_->setObjectName(QStringLiteral("guidedTertiary"));
+  guided_cancel_action_ = new QPushButton(QStringLiteral("Cancel"));
+  guided_cancel_action_->setObjectName(QStringLiteral("guidedCancel"));
+  connect(guided_back_action_, &QPushButton::clicked, this,
+          &MainWindow::guidedBack);
+  connect(guided_primary_action_, &QPushButton::clicked, this,
+          &MainWindow::guidedPrimary);
+  connect(guided_secondary_action_, &QPushButton::clicked, this,
+          &MainWindow::guidedSecondary);
+  connect(guided_tertiary_action_, &QPushButton::clicked, this,
+          &MainWindow::guidedTertiary);
+  connect(guided_cancel_action_, &QPushButton::clicked, this,
+          &MainWindow::guidedCancel);
+  guided_controls->addWidget(guided_back_action_);
+  guided_controls->addWidget(guided_primary_action_);
+  guided_controls->addWidget(guided_secondary_action_);
+  guided_controls->addWidget(guided_tertiary_action_);
+  guided_controls->addWidget(guided_cancel_action_);
+  layout->addLayout(guided_controls);
+
+  guided_physical_note_ = new QLineEdit;
+  guided_physical_note_->setObjectName(QStringLiteral("guidedPhysicalNote"));
+  guided_physical_note_->setPlaceholderText(
+      QStringLiteral("Optional guided physical-result note"));
+  auto* guided_physical_controls = new QHBoxLayout;
+  guided_physical_worked_action_ = new QPushButton(QStringLiteral("Yes"));
+  guided_physical_worked_action_->setObjectName(
+      QStringLiteral("guidedPhysicalWorked"));
+  guided_physical_failed_action_ = new QPushButton(QStringLiteral("No"));
+  guided_physical_failed_action_->setObjectName(
+      QStringLiteral("guidedPhysicalFailed"));
+  guided_physical_not_checked_action_ =
+      new QPushButton(QStringLiteral("Not sure / not checked"));
+  guided_physical_not_checked_action_->setObjectName(
+      QStringLiteral("guidedPhysicalNotChecked"));
+  connect(guided_physical_worked_action_, &QPushButton::clicked, this, [this] {
+    guidedPhysicalResult(frontend::CompatibilityPhysicalResult::Worked);
+  });
+  connect(guided_physical_failed_action_, &QPushButton::clicked, this, [this] {
+    guidedPhysicalResult(frontend::CompatibilityPhysicalResult::Failed);
+  });
+  connect(guided_physical_not_checked_action_, &QPushButton::clicked, this,
+          [this] {
+            guidedPhysicalResult(frontend::CompatibilityPhysicalResult::NotChecked);
+          });
+  guided_physical_controls->addWidget(guided_physical_worked_action_);
+  guided_physical_controls->addWidget(guided_physical_failed_action_);
+  guided_physical_controls->addWidget(guided_physical_not_checked_action_);
+  layout->addWidget(guided_physical_note_);
+  layout->addLayout(guided_physical_controls);
   return page;
 }
 
@@ -637,6 +767,95 @@ void MainWindow::renderCompatibilityCapture() {
   }
 }
 
+void MainWindow::renderGuidedCompatibilityTest() {
+  if (!guided_test_selector_) return;
+  const auto selected = SelectedGuidedScenario(guided_test_selector_);
+  if (guided_test_.active()) {
+    const auto view = guided_test_.view();
+    const bool finished = view.state == frontend::GuidedCompatibilityTestState::Completed ||
+                          view.state == frontend::GuidedCompatibilityTestState::Failed ||
+                          view.state == frontend::GuidedCompatibilityTestState::Inconclusive ||
+                          view.state == frontend::GuidedCompatibilityTestState::Cancelled;
+    guided_test_title_value_->setText(QString::fromStdString(view.title));
+    guided_test_description_value_->setText(
+        QString::fromStdString(view.description));
+    guided_test_state_value_->setText(GuidedTestStateName(view.state));
+    guided_test_step_value_->setText(
+        QStringLiteral("%1 / %2").arg(view.step_index).arg(view.step_count));
+    guided_test_instruction_value_->setText(
+        QString::fromStdString(view.instruction));
+    guided_test_detail_value_->setText(QString::fromStdString(view.detail));
+    start_guided_test_action_->setText(
+        finished ? QStringLiteral("Start Another Test")
+                 : QStringLiteral("Start Test"));
+    start_guided_test_action_->setEnabled(finished);
+    guided_test_selector_->setEnabled(finished);
+    auto apply_button = [](QPushButton* button,
+                           const std::optional<
+                               frontend::GuidedCompatibilityTestButton>& value) {
+      if (!button) return;
+      if (!value) {
+        button->hide();
+        button->setEnabled(false);
+        return;
+      }
+      button->setText(QString::fromStdString(value->label));
+      button->setEnabled(value->enabled);
+      button->show();
+    };
+    apply_button(guided_primary_action_, finished ? std::nullopt : view.primary);
+    apply_button(guided_secondary_action_,
+                 finished ? std::nullopt : view.secondary);
+    apply_button(guided_tertiary_action_, finished ? std::nullopt : view.tertiary);
+    apply_button(guided_back_action_, finished ? std::nullopt : view.back);
+    apply_button(guided_cancel_action_, finished ? std::nullopt : view.cancel);
+    guided_physical_note_->setEnabled(!finished && view.show_physical_choices);
+    guided_physical_note_->setVisible(!finished && view.show_physical_choices);
+    guided_physical_worked_action_->setVisible(!finished && view.show_physical_choices);
+    guided_physical_failed_action_->setVisible(!finished && view.show_physical_choices);
+    guided_physical_not_checked_action_->setVisible(
+        !finished && view.show_physical_choices);
+    guided_physical_worked_action_->setEnabled(!finished && view.show_physical_choices);
+    guided_physical_failed_action_->setEnabled(!finished && view.show_physical_choices);
+    guided_physical_not_checked_action_->setEnabled(
+        !finished && view.show_physical_choices);
+    if (!finished && view.show_physical_choices) {
+      guided_test_detail_value_->setText(
+          QString::fromStdString(view.physical_prompt + "\n" + view.detail));
+    }
+    return;
+  }
+
+  guided_test_title_value_->setText(
+      selected ? guided_test_selector_->currentText()
+               : QStringLiteral("Remote Control — Manual"));
+  guided_test_description_value_->setText(
+      selected
+          ? QStringLiteral("Guided scenario will reuse Compatibility Capture and the existing typed action/state streams.")
+          : QStringLiteral("Manual only. Use Compatibility Capture and the CEC Monitor while pressing the TV remote."));
+  guided_test_state_value_->setText(QStringLiteral("Idle"));
+  guided_test_step_value_->setText(QStringLiteral("Not started"));
+  guided_test_instruction_value_->setText(
+      selected ? QStringLiteral("Starting a guided test will start Compatibility Capture if needed.")
+               : QStringLiteral("No guided wizard is provided for remote-control testing."));
+  guided_test_detail_value_->setText(selected ? QStringLiteral("No CEC command is sent until an explicit guided Send step.")
+                                              : QStringLiteral("Use markers, notes, and the live monitor to collect evidence manually."));
+  start_guided_test_action_->setText(QStringLiteral("Start Test"));
+  start_guided_test_action_->setEnabled(selected.has_value());
+  guided_test_selector_->setEnabled(true);
+  for (auto* button : {guided_primary_action_, guided_secondary_action_,
+                       guided_tertiary_action_, guided_back_action_,
+                       guided_cancel_action_, guided_physical_worked_action_,
+                       guided_physical_failed_action_,
+                       guided_physical_not_checked_action_}) {
+    button->hide();
+    button->setEnabled(false);
+  }
+  guided_physical_note_->clear();
+  guided_physical_note_->hide();
+  guided_physical_note_->setEnabled(false);
+}
+
 void MainWindow::renderConfiguration(
     const frontend::FrontendConfigurationSnapshot& value) {
   if (configuration_pending_) {
@@ -778,6 +997,19 @@ void MainWindow::startCompatibilityCapture() {
   renderCompatibilityCapture();
 }
 
+void MainWindow::startCompatibilityCaptureIfNeeded() {
+  const auto state = compatibility_capture_.state();
+  if (state == frontend::CompatibilityCaptureState::Capturing) return;
+  if (state == frontend::CompatibilityCaptureState::Completed) {
+    const auto answer = QMessageBox::question(
+        this, QStringLiteral("Start Guided Test"),
+        QStringLiteral("Starting this guided test will replace the completed "
+                       "capture with a new active capture. Continue?"));
+    if (answer != QMessageBox::Yes) return;
+  }
+  startCompatibilityCapture();
+}
+
 void MainWindow::stopCompatibilityCapture() {
   compatibility_capture_.stop(std::chrono::system_clock::now());
   capture_pending_physical_request_.reset();
@@ -860,6 +1092,110 @@ void MainWindow::recordPhysicalResult(
   capture_physical_note_->clear();
   capture_pending_physical_request_.reset();
   renderCompatibilityCapture();
+}
+
+void MainWindow::startGuidedCompatibilityTest() {
+  const auto selected = SelectedGuidedScenario(guided_test_selector_);
+  if (!selected) return;
+  const auto old_state = compatibility_capture_.state();
+  startCompatibilityCaptureIfNeeded();
+  if (old_state == frontend::CompatibilityCaptureState::Completed &&
+      compatibility_capture_.state() != frontend::CompatibilityCaptureState::Capturing) {
+    return;
+  }
+  guided_test_ = frontend::GuidedCompatibilityTestSession{};
+  if (!guided_test_.start(*selected, backend_->status(),
+                          compatibility_capture_.state() ==
+                              frontend::CompatibilityCaptureState::Capturing,
+                          std::chrono::system_clock::now())) {
+    return;
+  }
+  compatibility_capture_.record_marker(
+      "guided_test_start:" +
+          frontend::compatibility_guided_test_scenario_name(*selected),
+      std::chrono::system_clock::now());
+  syncGuidedTestCapture(false);
+  renderCompatibilityCapture();
+  renderGuidedCompatibilityTest();
+}
+
+void MainWindow::guidedPrimary() {
+  const auto effect = guided_test_.choose_primary(std::chrono::system_clock::now());
+  if (effect.action_to_send) {
+    const auto request = backend_->request_action(*effect.action_to_send);
+    guided_test_.on_action_request_accepted(request, std::chrono::system_clock::now());
+    if (request != 0) {
+      compatibility_capture_.record_action_requested(
+          request, *effect.action_to_send, std::chrono::system_clock::now());
+      compatibility_capture_.record_marker(
+          "guided_step:" + guided_test_.view().title,
+          std::chrono::system_clock::now());
+    }
+  }
+  syncGuidedTestCapture(true);
+  renderCompatibilityCapture();
+  renderGuidedCompatibilityTest();
+}
+
+void MainWindow::guidedSecondary() {
+  guided_test_.choose_secondary(std::chrono::system_clock::now());
+  syncGuidedTestCapture(true);
+  renderCompatibilityCapture();
+  renderGuidedCompatibilityTest();
+}
+
+void MainWindow::guidedTertiary() {
+  guided_test_.choose_tertiary(std::chrono::system_clock::now());
+  syncGuidedTestCapture(true);
+  renderCompatibilityCapture();
+  renderGuidedCompatibilityTest();
+}
+
+void MainWindow::guidedBack() {
+  guided_test_.choose_back(std::chrono::system_clock::now());
+  syncGuidedTestCapture(false);
+  renderGuidedCompatibilityTest();
+}
+
+void MainWindow::guidedCancel() {
+  guided_test_.cancel(std::chrono::system_clock::now());
+  syncGuidedTestCapture(true);
+  renderCompatibilityCapture();
+  renderGuidedCompatibilityTest();
+}
+
+void MainWindow::guidedPhysicalResult(
+    frontend::CompatibilityPhysicalResult result) {
+  guided_test_.on_physical_confirmation(
+      result, guided_physical_note_->text().toStdString(),
+      std::chrono::system_clock::now());
+  if (const auto* record = guided_test_.record();
+      record && !record->physical_confirmations.empty()) {
+    const auto& confirmation = record->physical_confirmations.back();
+    compatibility_capture_.record_action_physical_result(
+        confirmation.request_id, confirmation.result, confirmation.note,
+        confirmation.timestamp);
+  }
+  guided_physical_note_->clear();
+  syncGuidedTestCapture(true);
+  renderCompatibilityCapture();
+  renderGuidedCompatibilityTest();
+}
+
+void MainWindow::syncGuidedTestCapture(bool add_marker) {
+  const auto* record = guided_test_.record();
+  if (!record ||
+      compatibility_capture_.state() != frontend::CompatibilityCaptureState::Capturing) {
+    return;
+  }
+  compatibility_capture_.upsert_guided_test(*record);
+  if (!add_marker) return;
+  compatibility_capture_.record_marker(
+      "guided_test:" +
+          frontend::compatibility_guided_test_scenario_name(record->scenario) +
+          ":" +
+          frontend::compatibility_guided_test_outcome_name(record->outcome),
+      std::chrono::system_clock::now());
 }
 
 }  // namespace cec_injector::mate::gui
