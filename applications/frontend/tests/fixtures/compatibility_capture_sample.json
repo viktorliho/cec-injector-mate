@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "capture": {
+    "state": "Completed",
+    "started_at": "2024-08-29T00:00:00.000Z",
+    "ended_at": "2024-08-29T00:00:00.600Z",
+    "duration_ms": 600
+  },
+  "application": {
+    "name": "CEC Injector Mate",
+    "platform": "macOS",
+    "version": "0.0.99",
+    "git_revision": "deadbeef"
+  },
+  "device": {
+    "selected_device": "compat-device",
+    "device_display_name": "CEC Injector",
+    "injector_connected": true,
+    "session_state": "Connected",
+    "logical_address": 4,
+    "wake": {
+      "supported": true,
+      "configured": true,
+      "armed": false,
+      "reason_available": false
+    }
+  },
+  "display": {
+    "display_name": "Guest TV",
+    "edid_available": true,
+    "edid_byte_count": 256,
+    "physical_address_status": "Available",
+    "physical_address": "1.0.0.0"
+  },
+  "configuration": {
+    "revision": 7,
+    "policy": {
+      "power_on_boot": true,
+      "power_on_resume": true,
+      "standby_on_suspend": true,
+      "standby_on_shutdown": true,
+      "suspend_on_tv_standby": true,
+      "wake_host_on_tv_source_request": true
+    },
+    "remote": {
+      "enabled": false,
+      "profile": "SteamOsParity"
+    }
+  },
+  "capabilities": {
+    "configuration": true,
+    "remote_input": false,
+    "remote_wake": false,
+    "tv_power_actions": true,
+    "cec_monitor": true
+  },
+  "events": [
+    {
+      "timestamp": "2024-08-29T00:00:00.100Z",
+      "direction": "RX",
+      "source": 0,
+      "destination": 15,
+      "opcode": "36",
+      "payload": [],
+      "semantic": "TV standby"
+    },
+    {
+      "timestamp": "2024-08-29T00:00:00.120Z",
+      "direction": "TX",
+      "source": 4,
+      "destination": 0,
+      "opcode": "82",
+      "payload": ["10", "00"],
+      "semantic": "Active Source"
+    }
+  ],
+  "actions": [
+    {
+      "request_id": 41,
+      "action": "MakeActiveSource",
+      "requested_at": "2024-08-29T00:00:00.200Z",
+      "completed_at": "2024-08-29T00:00:00.350Z",
+      "result": "Timeout",
+      "duration_ms": 135,
+      "message": "TV switched anyway",
+      "physical_result": "Worked",
+      "physical_recorded_at": "2024-08-29T00:00:00.375Z",
+      "physical_note": "TV switched to Mac HDMI"
+    }
+  ],
+  "status_transitions": [
+    {
+      "timestamp": "2024-08-29T00:00:00.020Z",
+      "service_available": true,
+      "injector_connected": true,
+      "selected_device": "compat-device",
+      "display_name": "Guest TV",
+      "physical_address_status": "Available",
+      "physical_address": "1.0.0.0",
+      "logical_address": 4,
+      "session_state": "Disconnected",
+      "wake_supported": true,
+      "wake_configured": true,
+      "wake_armed": false,
+      "host_power_state": "Running",
+      "edid_available": true,
+      "edid_byte_count": 256
+    }
+  ],
+  "markers": [
+    {"timestamp": "2024-08-29T00:00:00.450Z", "name": "Active Source test"}
+  ],
+  "notes": [
+    {"timestamp": "2024-08-29T00:00:00.400Z", "text": "TV switched physically"}
+  ],
+  "counters": {
+    "rx_events": 1,
+    "tx_events": 1,
+    "retained_events": 2,
+    "dropped_events": 0,
+    "status_transition_count": 1,
+    "action_count": 1,
+    "marker_count": 1,
+    "note_count": 1,
+    "opcode_frequency": {
+      "36": 1,
+      "82": 1
+    },
+    "semantic_frequency": {
+      "Active Source": 1,
+      "TV standby": 1
+    }
+  }
+}

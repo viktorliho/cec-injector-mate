@@ -46,6 +46,9 @@ target_include_directories(cec_injector_mate_gui_support PUBLIC
 target_link_libraries(cec_injector_mate_gui_support PUBLIC
     CECInjector::MateFrontend Qt6::Core Qt6::Gui Qt6::Widgets)
 target_compile_features(cec_injector_mate_gui_support PUBLIC cxx_std_20)
+target_compile_definitions(cec_injector_mate_gui_support PUBLIC
+    CEC_INJECTOR_MATE_GUI_GIT_HASH="${CEC_INJECTOR_MATE_GUI_GIT_HASH}"
+    CEC_INJECTOR_MATE_GUI_BUNDLE_SHORT_VERSION="${CEC_INJECTOR_MATE_GUI_BUNDLE_SHORT_VERSION}")
 if(CEC_INJECTOR_MATE_BUILD_LINUX)
     target_sources(cec_injector_mate_gui_support PRIVATE
         include/cec_injector/mate/gui/daemon_mate_frontend_backend.h

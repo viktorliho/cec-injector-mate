@@ -1,6 +1,8 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
 #include <QPushButton>
 
 #include <cstdlib>
@@ -26,7 +28,16 @@ class ControlledBackend final : public MateFrontendBackend {
  public:
   ControlledBackend() {
     status_.service_available = true;
+    status_.injector_connected = true;
+    status_.selected_device = DeviceId("capture-device");
+    status_.display_name = "Capture TV";
+    status_.physical_address_status = PhysicalAddressStatus::Available;
+    status_.physical_address = 0x1000;
+    status_.logical_address = 4;
+    status_.session_state = SessionState::Connected;
     capabilities_.configuration = true;
+    capabilities_.tv_power_actions = true;
+    capabilities_.cec_monitor = true;
     configuration_.revision = 1;
     configuration_.configuration = production_runtime_defaults();
   }
@@ -43,7 +54,11 @@ class ControlledBackend final : public MateFrontendBackend {
     requested = value;
     return next_request++;
   }
-  FrontendActionRequestId request_action(FrontendAction) override { return 1; }
+  FrontendActionRequestId request_action(FrontendAction action) override {
+    last_action = action;
+    ++action_requests;
+    return next_action_request++;
+  }
 
   void change(const FrontendConfigurationSnapshot& value) {
     configuration_ = value;
@@ -65,9 +80,22 @@ class ControlledBackend final : public MateFrontendBackend {
     change(value);
   }
 
+  void pushStatus(const FrontendStatus& status) {
+    status_ = status;
+    observer_->on_frontend_status_changed(status_);
+  }
+
+  void completeAction(FrontendActionRequestId request,
+                      const FrontendActionResult& result) {
+    observer_->on_frontend_action_completed(request, result);
+  }
+
   std::uint64_t requested_base{};
   FrontendConfiguration requested;
   FrontendConfigurationRequestId next_request{41};
+  FrontendActionRequestId next_action_request{71};
+  FrontendAction last_action{FrontendAction::PowerOnTv};
+  int action_requests{};
 
  private:
   MateFrontendObserver* observer_{};
@@ -247,5 +275,75 @@ int main(int argc, char** argv) {
     Check(controls.result->text().contains("Reset required") &&
               controls.reset->isEnabled() && !controls.apply->isEnabled(),
           "fresh state after service recovery wins without stale correlation");
+  }
+
+  {
+    auto backend = std::make_unique<ControlledBackend>();
+    auto* control = backend.get();
+    cec_injector::mate::gui::MainWindow capture_window(std::move(backend));
+    FlushEvents(application);
+    auto* toggle = capture_window.findChild<QCheckBox*>("labModeToggle");
+    toggle->setChecked(true);
+    FlushEvents(application);
+    auto* start = capture_window.findChild<QPushButton*>("startCapture");
+    auto* stop = capture_window.findChild<QPushButton*>("stopCapture");
+    auto* clear = capture_window.findChild<QPushButton*>("clearCapture");
+    auto* export_button =
+        capture_window.findChild<QPushButton*>("exportCapture");
+    auto* action_count =
+        capture_window.findChild<QLabel*>("captureActionCount");
+    auto* status_count =
+        capture_window.findChild<QLabel*>("captureStatusChangeCount");
+    auto* state = capture_window.findChild<QLabel*>("captureState");
+    auto* worked =
+        capture_window.findChild<QPushButton*>("capturePhysicalWorked");
+    auto* physical_note =
+        capture_window.findChild<QLineEdit*>("capturePhysicalNote");
+    auto* timeline = capture_window.findChild<QListWidget*>("captureTimeline");
+    Check(start && stop && clear && export_button && action_count &&
+              status_count && state && worked && physical_note && timeline,
+          "capture controls exist");
+    Check(control->action_requests == 0, "capture start has no side effects");
+    start->click();
+    FlushEvents(application);
+    Check(state->text() == "Capturing", "capture entered capturing state");
+    Check(control->action_requests == 0, "start capture does not send action");
+
+    auto* power = capture_window.findChild<QPushButton*>("powerOnAction");
+    power->click();
+    FlushEvents(application);
+    Check(control->action_requests == 1 &&
+              control->last_action == FrontendAction::PowerOnTv,
+          "manual action still goes through normal request path");
+    control->completeAction(
+        71, {.action = FrontendAction::PowerOnTv,
+             .result = OperationResult::Success,
+             .duration = std::chrono::milliseconds(55),
+             .message = "ok"});
+    FlushEvents(application);
+    Check(action_count->text() == "1", "completed action counted");
+    Check(worked->isEnabled(), "physical result can be recorded");
+    physical_note->setText("TV woke");
+    worked->click();
+    FlushEvents(application);
+    Check(!worked->isEnabled(), "physical result recording clears pending state");
+
+    auto disconnected = control->status();
+    disconnected.session_state = SessionState::Disconnected;
+    disconnected.injector_connected = false;
+    control->pushStatus(disconnected);
+    FlushEvents(application);
+    Check(status_count->text() == "1", "status transition recorded");
+    Check(timeline->count() > 0, "capture timeline shows recent activity");
+
+    stop->click();
+    FlushEvents(application);
+    Check(state->text() == "Completed" && export_button->isEnabled(),
+          "completed capture is exportable");
+    clear->click();
+    FlushEvents(application);
+    Check(state->text() == "Idle" && action_count->text() == "0" &&
+              !export_button->isEnabled(),
+          "clear resets local capture state");
   }
 }

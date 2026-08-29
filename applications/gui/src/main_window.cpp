@@ -1,16 +1,23 @@
 #include "cec_injector/mate/gui/main_window.h"
 
 #include <QCheckBox>
+#include <QComboBox>
+#include <QDir>
+#include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QInputDialog>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
+#include <QMessageBox>
 #include <QPushButton>
+#include <QSaveFile>
 #include <QSignalBlocker>
 #include <QStackedWidget>
 #include <QTableView>
-#include <QTableWidget>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include "cec_injector/mate/gui/backend_qt_bridge.h"
@@ -66,6 +73,39 @@ QLabel* ValueLabel(const char* name) {
   return label;
 }
 
+QString CaptureStateName(frontend::CompatibilityCaptureState state) {
+  return QString::fromStdString(
+      frontend::compatibility_capture_state_name(state));
+}
+
+frontend::CompatibilityCaptureApplicationInfo CaptureApplicationInfo() {
+  frontend::CompatibilityCaptureApplicationInfo info;
+  info.application_name = "CEC Injector Mate";
+#if defined(CEC_INJECTOR_MATE_GUI_MACOS_IN_PROCESS)
+  info.platform = "macOS";
+#elif defined(CEC_INJECTOR_MATE_GUI_LINUX_DBUS)
+  info.platform = "Linux";
+#else
+  info.platform = "Unknown";
+#endif
+#ifdef CEC_INJECTOR_MATE_GUI_BUNDLE_SHORT_VERSION
+  info.version = CEC_INJECTOR_MATE_GUI_BUNDLE_SHORT_VERSION;
+#else
+  info.version = "unknown";
+#endif
+#ifdef CEC_INJECTOR_MATE_GUI_GIT_HASH
+  info.git_revision = CEC_INJECTOR_MATE_GUI_GIT_HASH;
+#else
+  info.git_revision = "unknown";
+#endif
+  return info;
+}
+
+QString DefaultExportPath(const std::string& basename) {
+  return QDir::current().filePath(QString::fromStdString(basename) +
+                                  QStringLiteral(".md"));
+}
+
 }  // namespace
 
 MainWindow::MainWindow(std::unique_ptr<frontend::MateFrontendBackend> backend,
@@ -99,11 +139,26 @@ MainWindow::MainWindow(std::unique_ptr<frontend::MateFrontendBackend> backend,
   navigation_->setCurrentRow(0);
   setLabModeEnabled(false);
 
+  capture_timer_ = new QTimer(this);
+  capture_timer_->setInterval(250);
+  connect(capture_timer_, &QTimer::timeout, this,
+          &MainWindow::renderCompatibilityCapture);
+  capture_timer_->start();
+
   bridge_ = std::make_unique<BackendQtBridge>(*backend_);
   connect(bridge_.get(), &BackendQtBridge::statusChanged, this,
-          &MainWindow::renderStatus);
-  connect(bridge_.get(), &BackendQtBridge::cecEventReceived, monitor_model_,
-          &CecMonitorModel::appendEvent);
+          [this](const frontend::FrontendStatus& status) {
+            compatibility_capture_.record_status_transition(
+                status, std::chrono::system_clock::now());
+            renderStatus(status);
+            renderCompatibilityCapture();
+          });
+  connect(bridge_.get(), &BackendQtBridge::cecEventReceived, this,
+          [this](const frontend::FrontendCecEvent& event) {
+            monitor_model_->appendEvent(event);
+            compatibility_capture_.record_cec_event(event);
+            renderCompatibilityCapture();
+          });
   connect(bridge_.get(), &BackendQtBridge::actionCompleted, this,
           [this](frontend::FrontendActionRequestId,
                  const frontend::FrontendActionResult& value) {
@@ -118,12 +173,24 @@ MainWindow::MainWindow(std::unique_ptr<frontend::MateFrontendBackend> backend,
                                         .arg(value.duration.count())
                                         .arg(QString::fromStdString(value.message)));
           });
+  connect(bridge_.get(), &BackendQtBridge::actionCompleted, this,
+          [this](frontend::FrontendActionRequestId request,
+                 const frontend::FrontendActionResult& value) {
+            compatibility_capture_.record_action_completed(
+                request, value, std::chrono::system_clock::now());
+            const auto pending =
+                compatibility_capture_.latest_action_needing_physical_result();
+            capture_pending_physical_request_ =
+                pending ? std::optional{pending->request_id} : std::nullopt;
+            renderCompatibilityCapture();
+          });
   connect(bridge_.get(), &BackendQtBridge::configurationChanged, this,
           &MainWindow::renderConfiguration);
   connect(bridge_.get(), &BackendQtBridge::configurationCompleted, this,
           &MainWindow::completeConfiguration);
   renderConfiguration(backend_->configuration());
   renderStatus(backend_->status());
+  renderCompatibilityCapture();
 }
 
 MainWindow::~MainWindow() = default;
@@ -305,7 +372,12 @@ QWidget* MainWindow::createCommandsPage() {
       if (request == 0) {
         button->setEnabled(true);
         action_result_->setText(QStringLiteral("Request rejected"));
+        renderCompatibilityCapture();
+        return;
       }
+      compatibility_capture_.record_action_requested(
+          request, action, std::chrono::system_clock::now());
+      renderCompatibilityCapture();
     });
     layout->addWidget(button);
   }
@@ -315,21 +387,109 @@ QWidget* MainWindow::createCommandsPage() {
 }
 
 QWidget* MainWindow::createTestsPage() {
-  auto* table = new QTableWidget;
-  const std::vector<std::string> tests{
-      "Injector discovery", "Physical Address", "CEC session", "CEC receive",
-      "Active Source", "Power On", "Standby", "Wake Extension"};
-  table->setColumnCount(3);
-  table->setHorizontalHeaderLabels({"Test", "Status", "Detail"});
-  table->setRowCount(static_cast<int>(tests.size()));
-  for (int row = 0; row < static_cast<int>(tests.size()); ++row) {
-    table->setItem(row, 0,
-                   new QTableWidgetItem(QString::fromStdString(tests[row])));
-    table->setItem(row, 1, new QTableWidgetItem(QStringLiteral("Not Run")));
-    table->setItem(row, 2, new QTableWidgetItem);
+  auto* page = new QWidget;
+  auto* layout = new QVBoxLayout(page);
+  layout->addWidget(new QLabel(QStringLiteral("Compatibility Capture")));
+
+  auto* summary = new QFormLayout;
+  capture_state_value_ = ValueLabel("captureState");
+  capture_elapsed_value_ = ValueLabel("captureElapsed");
+  capture_event_count_value_ = ValueLabel("captureEventCount");
+  capture_action_count_value_ = ValueLabel("captureActionCount");
+  capture_transition_count_value_ = ValueLabel("captureStatusChangeCount");
+  capture_marker_count_value_ = ValueLabel("captureMarkerCount");
+  capture_note_count_value_ = ValueLabel("captureNoteCount");
+  capture_dropped_count_value_ = ValueLabel("captureDroppedCount");
+  summary->addRow(QStringLiteral("State"), capture_state_value_);
+  summary->addRow(QStringLiteral("Elapsed"), capture_elapsed_value_);
+  summary->addRow(QStringLiteral("CEC events"), capture_event_count_value_);
+  summary->addRow(QStringLiteral("Action results"), capture_action_count_value_);
+  summary->addRow(QStringLiteral("Status changes"),
+                  capture_transition_count_value_);
+  summary->addRow(QStringLiteral("Markers"), capture_marker_count_value_);
+  summary->addRow(QStringLiteral("Notes"), capture_note_count_value_);
+  summary->addRow(QStringLiteral("Dropped events"), capture_dropped_count_value_);
+  layout->addLayout(summary);
+
+  auto* controls = new QHBoxLayout;
+  start_capture_action_ = new QPushButton(QStringLiteral("Start Capture"));
+  start_capture_action_->setObjectName(QStringLiteral("startCapture"));
+  stop_capture_action_ = new QPushButton(QStringLiteral("Stop Capture"));
+  stop_capture_action_->setObjectName(QStringLiteral("stopCapture"));
+  clear_capture_action_ = new QPushButton(QStringLiteral("Clear"));
+  clear_capture_action_->setObjectName(QStringLiteral("clearCapture"));
+  export_capture_action_ = new QPushButton(QStringLiteral("Export Report"));
+  export_capture_action_->setObjectName(QStringLiteral("exportCapture"));
+  connect(start_capture_action_, &QPushButton::clicked, this,
+          &MainWindow::startCompatibilityCapture);
+  connect(stop_capture_action_, &QPushButton::clicked, this,
+          &MainWindow::stopCompatibilityCapture);
+  connect(clear_capture_action_, &QPushButton::clicked, this,
+          &MainWindow::clearCompatibilityCapture);
+  connect(export_capture_action_, &QPushButton::clicked, this,
+          &MainWindow::exportCompatibilityCapture);
+  controls->addWidget(start_capture_action_);
+  controls->addWidget(stop_capture_action_);
+  controls->addWidget(clear_capture_action_);
+  controls->addWidget(export_capture_action_);
+  layout->addLayout(controls);
+
+  auto* marker_controls = new QHBoxLayout;
+  capture_marker_selector_ = new QComboBox;
+  capture_marker_selector_->setObjectName(QStringLiteral("captureMarkerSelector"));
+  for (const auto* label : {"Baseline", "Remote input test",
+                            "Active Source test", "Power On test",
+                            "Standby test", "USB reconnect",
+                            "HDMI reconnect"}) {
+    capture_marker_selector_->addItem(QString::fromUtf8(label));
   }
-  table->horizontalHeader()->setStretchLastSection(true);
-  return table;
+  add_marker_action_ = new QPushButton(QStringLiteral("Add Marker"));
+  add_marker_action_->setObjectName(QStringLiteral("addCaptureMarker"));
+  add_note_action_ = new QPushButton(QStringLiteral("Add Note"));
+  add_note_action_->setObjectName(QStringLiteral("addCaptureNote"));
+  connect(add_marker_action_, &QPushButton::clicked, this,
+          &MainWindow::addCompatibilityMarker);
+  connect(add_note_action_, &QPushButton::clicked, this,
+          &MainWindow::promptCompatibilityNote);
+  marker_controls->addWidget(capture_marker_selector_, 1);
+  marker_controls->addWidget(add_marker_action_);
+  marker_controls->addWidget(add_note_action_);
+  layout->addLayout(marker_controls);
+
+  capture_physical_prompt_value_ = ValueLabel("capturePhysicalPrompt");
+  capture_physical_note_ = new QLineEdit;
+  capture_physical_note_->setObjectName(QStringLiteral("capturePhysicalNote"));
+  capture_physical_note_->setPlaceholderText(
+      QStringLiteral("Optional physical-result note"));
+  auto* physical_controls = new QHBoxLayout;
+  physical_worked_action_ = new QPushButton(QStringLiteral("Worked"));
+  physical_worked_action_->setObjectName(QStringLiteral("capturePhysicalWorked"));
+  physical_failed_action_ = new QPushButton(QStringLiteral("Did not work"));
+  physical_failed_action_->setObjectName(QStringLiteral("capturePhysicalFailed"));
+  physical_not_checked_action_ = new QPushButton(QStringLiteral("Not checked"));
+  physical_not_checked_action_->setObjectName(
+      QStringLiteral("capturePhysicalNotChecked"));
+  connect(physical_worked_action_, &QPushButton::clicked, this, [this] {
+    recordPhysicalResult(frontend::CompatibilityPhysicalResult::Worked);
+  });
+  connect(physical_failed_action_, &QPushButton::clicked, this, [this] {
+    recordPhysicalResult(frontend::CompatibilityPhysicalResult::Failed);
+  });
+  connect(physical_not_checked_action_, &QPushButton::clicked, this, [this] {
+    recordPhysicalResult(frontend::CompatibilityPhysicalResult::NotChecked);
+  });
+  physical_controls->addWidget(physical_worked_action_);
+  physical_controls->addWidget(physical_failed_action_);
+  physical_controls->addWidget(physical_not_checked_action_);
+  layout->addWidget(capture_physical_prompt_value_);
+  layout->addWidget(capture_physical_note_);
+  layout->addLayout(physical_controls);
+
+  capture_timeline_ = new QListWidget;
+  capture_timeline_->setObjectName(QStringLiteral("captureTimeline"));
+  layout->addWidget(new QLabel(QStringLiteral("Recent timeline")));
+  layout->addWidget(capture_timeline_, 1);
+  return page;
 }
 
 void MainWindow::addPage(const QString& title, QWidget* page, bool lab_only) {
@@ -407,6 +567,74 @@ void MainWindow::renderStatus(const frontend::FrontendStatus& status) {
     remote_profile_->setText(QStringLiteral("Unavailable on this platform"));
   }
   markConfigurationDirty();
+}
+
+void MainWindow::renderCompatibilityCapture() {
+  if (!capture_state_value_) return;
+  const auto counts = compatibility_capture_.counts();
+  capture_state_value_->setText(CaptureStateName(compatibility_capture_.state()));
+  const auto elapsed =
+      compatibility_capture_.elapsed(std::chrono::system_clock::now());
+  capture_elapsed_value_->setText(
+      elapsed ? QStringLiteral("%1 ms").arg(elapsed->count())
+              : QStringLiteral("Not started"));
+  capture_event_count_value_->setText(
+      QStringLiteral("%1 retained / %2 total")
+          .arg(counts.retained_cec_events)
+          .arg(counts.total_cec_events));
+  capture_action_count_value_->setText(QString::number(counts.action_count));
+  capture_transition_count_value_->setText(
+      QString::number(counts.status_transition_count));
+  capture_marker_count_value_->setText(QString::number(counts.marker_count));
+  capture_note_count_value_->setText(QString::number(counts.note_count));
+  capture_dropped_count_value_->setText(
+      QString::number(counts.dropped_cec_events));
+
+  const auto active =
+      compatibility_capture_.state() == frontend::CompatibilityCaptureState::Capturing;
+  const auto completed =
+      compatibility_capture_.state() == frontend::CompatibilityCaptureState::Completed;
+  start_capture_action_->setEnabled(!active);
+  stop_capture_action_->setEnabled(active);
+  clear_capture_action_->setEnabled(active || completed);
+  export_capture_action_->setEnabled(completed);
+  add_note_action_->setEnabled(active);
+  add_marker_action_->setEnabled(active);
+  capture_marker_selector_->setEnabled(active);
+
+  const auto pending =
+      compatibility_capture_.latest_action_needing_physical_result();
+  capture_pending_physical_request_ =
+      pending ? std::optional{pending->request_id} : std::nullopt;
+  const bool physical_enabled = active && capture_pending_physical_request_.has_value();
+  physical_worked_action_->setEnabled(physical_enabled);
+  physical_failed_action_->setEnabled(physical_enabled);
+  physical_not_checked_action_->setEnabled(physical_enabled);
+  capture_physical_note_->setEnabled(physical_enabled);
+  if (pending) {
+    capture_physical_prompt_value_->setText(
+        QStringLiteral("Physical result for request #%1: %2 (%3)")
+            .arg(pending->request_id)
+            .arg(QString::fromStdString(
+                frontend::compatibility_physical_result_name(
+                    pending->physical_result)))
+            .arg(QString::fromStdString(
+                frontend::compatibility_capture_state_name(
+                    compatibility_capture_.state()))));
+  } else {
+    capture_physical_prompt_value_->setText(
+        active ? QStringLiteral("No completed action waiting for physical confirmation")
+               : QStringLiteral("Physical confirmation available only while capturing"));
+    if (!physical_enabled) capture_physical_note_->clear();
+  }
+
+  capture_timeline_->clear();
+  for (const auto& line : compatibility_capture_.recent_timeline_lines()) {
+    capture_timeline_->addItem(QString::fromStdString(line));
+  }
+  if (capture_timeline_->count() > 0) {
+    capture_timeline_->scrollToBottom();
+  }
 }
 
 void MainWindow::renderConfiguration(
@@ -539,6 +767,99 @@ void MainWindow::resetConfiguration() {
   external_conflict_ = false;
   renderConfiguration(authoritative_configuration_);
   configuration_result_->clear();
+}
+
+void MainWindow::startCompatibilityCapture() {
+  compatibility_capture_.start(CaptureApplicationInfo(), backend_->status(),
+                               backend_->capabilities(),
+                               backend_->configuration(),
+                               std::chrono::system_clock::now());
+  capture_pending_physical_request_.reset();
+  renderCompatibilityCapture();
+}
+
+void MainWindow::stopCompatibilityCapture() {
+  compatibility_capture_.stop(std::chrono::system_clock::now());
+  capture_pending_physical_request_.reset();
+  renderCompatibilityCapture();
+}
+
+void MainWindow::clearCompatibilityCapture() {
+  compatibility_capture_.clear();
+  capture_pending_physical_request_.reset();
+  capture_physical_note_->clear();
+  renderCompatibilityCapture();
+}
+
+void MainWindow::addCompatibilityMarker() {
+  compatibility_capture_.record_marker(
+      capture_marker_selector_->currentText().toStdString(),
+      std::chrono::system_clock::now());
+  renderCompatibilityCapture();
+}
+
+void MainWindow::promptCompatibilityNote() {
+  bool accepted = false;
+  const auto text = QInputDialog::getText(
+      this, QStringLiteral("Add Note"), QStringLiteral("Note"),
+      QLineEdit::Normal, {}, &accepted);
+  if (!accepted || text.trimmed().isEmpty()) return;
+  compatibility_capture_.record_note(text.toStdString(),
+                                     std::chrono::system_clock::now());
+  renderCompatibilityCapture();
+}
+
+void MainWindow::exportCompatibilityCapture() {
+  const auto export_data = compatibility_capture_.build_export();
+  if (export_data.markdown.empty() || export_data.json.empty()) {
+    QMessageBox::warning(this, QStringLiteral("Export Compatibility Report"),
+                         QStringLiteral("No completed capture is available."));
+    return;
+  }
+
+  const auto markdown_path = QFileDialog::getSaveFileName(
+      this, QStringLiteral("Export Compatibility Report"),
+      DefaultExportPath(export_data.suggested_basename),
+      QStringLiteral("Markdown (*.md)"));
+  if (markdown_path.isEmpty()) return;
+
+  QString json_path = markdown_path;
+  if (json_path.endsWith(QStringLiteral(".md"))) {
+    json_path.chop(3);
+  }
+  json_path += QStringLiteral(".json");
+
+  auto write_file = [&](const QString& path, const std::string& contents) -> bool {
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
+    if (file.write(contents.data(), static_cast<qint64>(contents.size())) < 0) {
+      return false;
+    }
+    return file.commit();
+  };
+
+  if (!write_file(markdown_path, export_data.markdown) ||
+      !write_file(json_path, export_data.json)) {
+    QMessageBox::critical(this, QStringLiteral("Export Compatibility Report"),
+                          QStringLiteral("Failed to write report files."));
+    return;
+  }
+
+  QMessageBox::information(
+      this, QStringLiteral("Export Compatibility Report"),
+      QStringLiteral("Saved:\n%1\n%2").arg(markdown_path, json_path));
+}
+
+void MainWindow::recordPhysicalResult(
+    frontend::CompatibilityPhysicalResult result) {
+  if (!capture_pending_physical_request_) return;
+  compatibility_capture_.record_action_physical_result(
+      *capture_pending_physical_request_, result,
+      capture_physical_note_->text().toStdString(),
+      std::chrono::system_clock::now());
+  capture_physical_note_->clear();
+  capture_pending_physical_request_.reset();
+  renderCompatibilityCapture();
 }
 
 }  // namespace cec_injector::mate::gui

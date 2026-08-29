@@ -1,4 +1,5 @@
 add_library(cec_injector_mate_frontend
+    src/compatibility_capture.cpp
     src/fake_frontend_backend.cpp
     src/frontend_state_projector.cpp
 )
@@ -22,4 +23,13 @@ if(BUILD_TESTING)
         CECInjector::MateFrontend)
     target_compile_features(mate-frontend-tests PRIVATE cxx_std_20)
     add_test(NAME mate-frontend COMMAND mate-frontend-tests)
+    add_executable(mate-compatibility-capture-tests
+        tests/compatibility_capture_test.cpp)
+    target_link_libraries(mate-compatibility-capture-tests PRIVATE
+        CECInjector::MateFrontend)
+    target_compile_features(mate-compatibility-capture-tests PRIVATE cxx_std_20)
+    target_compile_definitions(mate-compatibility-capture-tests PRIVATE
+        MATE_FRONTEND_TESTS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    add_test(NAME mate-compatibility-capture COMMAND
+        mate-compatibility-capture-tests)
 endif()
