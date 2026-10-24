@@ -28,27 +28,34 @@ class RuntimeConfigurationStore {
  public:
   virtual ~RuntimeConfigurationStore() = default;
   virtual bool prepare(const MateRuntimeConfiguration& configuration,
+                       std::uint64_t revision,
                        std::string& error) = 0;
   virtual bool commit(std::string& error) = 0;
   virtual bool restore(const MateRuntimeConfiguration& configuration,
+                       std::uint64_t revision,
                        std::string& error) = 0;
   virtual void abort() noexcept = 0;
 };
 
 class FileRuntimeConfigurationStore final : public RuntimeConfigurationStore {
  public:
-  explicit FileRuntimeConfigurationStore(std::filesystem::path path)
-      : path_(std::move(path)) {}
+  explicit FileRuntimeConfigurationStore(
+      std::filesystem::path path, std::filesystem::path backup_path = {})
+      : path_(std::move(path)), backup_path_(std::move(backup_path)) {}
   bool prepare(const MateRuntimeConfiguration& configuration,
+               std::uint64_t revision,
                std::string& error) override;
   bool commit(std::string& error) override;
   bool restore(const MateRuntimeConfiguration& configuration,
+               std::uint64_t revision,
                std::string& error) override;
   void abort() noexcept override;
 
  private:
   std::filesystem::path path_;
+  std::filesystem::path backup_path_;
   std::filesystem::path temporary_;
+  std::filesystem::path backup_temporary_;
   bool prepared_{};
 };
 
@@ -59,10 +66,12 @@ class RuntimeConfigurationController final {
 
   RuntimeConfigurationController(
       MateService& service, std::unique_ptr<RuntimeConfigurationStore> store,
-      MateRuntimeConfiguration initial, ChangedSink changed = {});
+      MateRuntimeConfiguration initial, ChangedSink changed = {},
+      std::uint64_t initial_revision = 1);
   RuntimeConfigurationController(
       LiveApply live_apply, std::unique_ptr<RuntimeConfigurationStore> store,
-      MateRuntimeConfiguration initial, ChangedSink changed = {});
+      MateRuntimeConfiguration initial, ChangedSink changed = {},
+      std::uint64_t initial_revision = 1);
 
   [[nodiscard]] VersionedRuntimeConfiguration current() const;
   void set_changed_sink(ChangedSink changed);

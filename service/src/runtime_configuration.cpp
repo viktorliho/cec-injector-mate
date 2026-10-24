@@ -2,11 +2,13 @@
 
 #include <cerrno>
 #include <cstring>
+#include <charconv>
 #include <fcntl.h>
 #include <fstream>
 #include <map>
 #include <sstream>
 #include <system_error>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace cec_injector::mate {
@@ -63,10 +65,11 @@ bool parse_remote_input_profile(std::string_view value,
 }
 
 std::string serialize_runtime_configuration(
-    const MateRuntimeConfiguration& configuration) {
+    const MateRuntimeConfiguration& configuration, std::uint64_t revision) {
   const auto boolean = [](bool value) { return value ? "true" : "false"; };
   std::ostringstream output;
   output << "version=1\n"
+         << "revision=" << revision << '\n'
          << "power_on_boot=" << boolean(configuration.policy.power_on_boot) << '\n'
          << "power_on_resume=" << boolean(configuration.policy.power_on_resume) << '\n'
          << "standby_on_suspend=" << boolean(configuration.policy.standby_on_suspend) << '\n'
@@ -106,6 +109,19 @@ RuntimeConfigurationLoadResult parse_runtime_configuration(
   if (version == fields.end() || version->second != "1") {
     result.error = "unsupported or missing configuration version";
     return result;
+  }
+  if (const auto revision = fields.find("revision"); revision != fields.end()) {
+    std::uint64_t value{};
+    const auto* begin = revision->second.data();
+    const auto* end = begin + revision->second.size();
+    const auto parsed = std::from_chars(begin, end, value);
+    if (parsed.ec != std::errc{} || parsed.ptr != end || value == 0 ||
+        (revision->second.size() > 1 && revision->second.front() == '0') ||
+        value > 999999999999999999ULL) {
+      result.error = "invalid configuration revision";
+      return result;
+    }
+    result.revision = value;
   }
   auto configuration = production_runtime_defaults();
   const auto parse_bool = [&](const char* key, bool& destination) {
@@ -165,18 +181,25 @@ RuntimeConfigurationLoadResult load_runtime_configuration(
 
 bool persist_runtime_configuration_atomic(
     const std::filesystem::path& path,
-    const MateRuntimeConfiguration& configuration, std::string& error) {
+    const MateRuntimeConfiguration& configuration, std::string& error,
+    std::uint64_t revision) {
+  if (revision == 0 || revision > 999999999999999999ULL) {
+    error = "invalid configuration revision";
+    return false;
+  }
   const auto directory = path.parent_path();
   std::string temporary_name{"."};
   temporary_name.append(path.filename().string());
   temporary_name.append(".tmp");
   const auto temporary = directory / temporary_name;
-  const auto contents = serialize_runtime_configuration(configuration);
+  const auto contents = serialize_runtime_configuration(configuration, revision);
   const int descriptor = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC |
                                                      O_CLOEXEC | O_NOFOLLOW,
                                 0600);
   if (descriptor < 0) return error = ErrnoMessage("open temporary configuration"), false;
-  bool ok = WriteAll(descriptor, contents, error);
+  bool ok = ::fchmod(descriptor, 0600) == 0;
+  if (!ok) error = ErrnoMessage("chmod temporary configuration");
+  if (ok) ok = WriteAll(descriptor, contents, error);
   if (ok && ::fsync(descriptor) != 0) {
     error = ErrnoMessage("fsync temporary configuration");
     ok = false;

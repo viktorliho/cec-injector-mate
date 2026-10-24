@@ -26,8 +26,8 @@ read-only DRM EDID queries use the ordinary primary-node `video` group without
 granting render-node access. The installer also provides the exact-device Wake
 rule, narrow suspend authorization, and two systemd units. Program files live
 below `/opt/cec-injector-mate/releases`; configuration is in
-`/etc/cec-injector-mate`; persistent PA state is in
-`/var/lib/cec-injector-mate`; `/run/cec-injector-mate` is ephemeral.
+`/etc/cec-injector-mate`; persistent PA state and a protected runtime policy
+backup are in `/var/lib/cec-injector-mate`; `/run/cec-injector-mate` is ephemeral.
 
 The project rules run after the normal seat rules and remove the `uaccess` tag
 for their selected devices. Service access relies on the owner `user::rw-` ACL
@@ -61,8 +61,10 @@ missed Boot action and ensures normal daemon restart never invokes Boot.
 current systemd invocation and checks the selected serial, PA, session, Wake,
 input permission, and lifecycle inhibitors. `uninstall.sh` removes only public
 integration and program files and preserves `/etc/cec-injector-mate` and
-`/var/lib/cec-injector-mate` by default. `--purge-state` removes persistent
-state explicitly.
+`/var/lib/cec-injector-mate` by default. `--purge-state` removes Mate-owned
+configuration, backup, and SteamOS keep-list registration explicitly. The
+`--repair-only` installer mode reconstructs integration from the verified
+installed release without activating Mate or invoking Boot PowerOn.
 
 For an immediate post-anomaly snapshot, run
 `sudo /opt/cec-injector-mate/current/libexec/health-check --diagnostics`.
@@ -74,4 +76,4 @@ and Wake state, installed manifest, boot ID, and the diagnostic health snapshot.
 It does not upload data or inspect unrelated user files.
 
 The pinned Debian 12 build recipe is under `debian12/`. SteamOS atomic-update
-and RAUC persistence remain deliberately deferred.
+preservation and recovery are described in `../steamos/README.md`.

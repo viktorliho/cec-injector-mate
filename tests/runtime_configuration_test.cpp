@@ -21,6 +21,7 @@ void Check(bool value, std::string_view message) {
 class Store final : public cec_injector::mate::RuntimeConfigurationStore {
  public:
   bool prepare(const cec_injector::mate::MateRuntimeConfiguration& value,
+               std::uint64_t,
                std::string& error) override {
     if (fail_prepare) { fail_prepare = false; error = "injected prepare failure"; return false; }
     pending = value;
@@ -33,6 +34,7 @@ class Store final : public cec_injector::mate::RuntimeConfigurationStore {
     return true;
   }
   bool restore(const cec_injector::mate::MateRuntimeConfiguration& value,
+               std::uint64_t,
                std::string&) override {
     restored = value;
     return !fail_restore;
@@ -59,7 +61,18 @@ int main() {
 
   const auto text = serialize_runtime_configuration(defaults);
   const auto parsed = parse_runtime_configuration(text);
-  Check(parsed.ok() && parsed.configuration == defaults, "full round trip");
+  Check(parsed.ok() && parsed.configuration == defaults && parsed.revision == 1,
+        "full round trip");
+  auto revised = parse_runtime_configuration(
+      serialize_runtime_configuration(defaults, 47));
+  Check(revised.ok() && revised.revision == 47,
+        "configuration revision round trip");
+  auto legacy = text;
+  legacy.erase(legacy.find("revision=1\n"), sizeof("revision=1\n") - 1);
+  Check(parse_runtime_configuration(legacy).revision == 1,
+        "legacy configuration revision migration");
+  Check(!parse_runtime_configuration("version=1\nrevision=0\n").ok(),
+        "zero revision rejected");
   Check(!parse_runtime_configuration("version=2\n").ok(),
         "unsupported version rejected");
   auto malformed = text;
@@ -89,6 +102,55 @@ int main() {
         "restart reload");
   Check(!std::filesystem::exists(directory / ".config.conf.tmp"),
         "temporary file removed");
+  const auto backup_directory = directory / "state";
+  std::filesystem::create_directory(backup_directory);
+  const auto backup = backup_directory / "runtime-config.backup";
+  Check(persist_runtime_configuration_atomic(backup, defaults, error, 9) &&
+            persist_runtime_configuration_atomic(path, defaults, error, 9),
+        "seed revisioned primary and backup");
+  RuntimeConfigurationController durable_controller(
+      [](const MateRuntimeConfiguration&) { return OperationResult::Success; },
+      std::make_unique<FileRuntimeConfigurationStore>(path, backup), defaults,
+      {}, 9);
+  auto durable_change = defaults;
+  durable_change.remote.enabled = false;
+  Check(durable_controller.set(9, durable_change).result ==
+            OperationResult::Success &&
+            load_runtime_configuration(path).revision == 10 &&
+            load_runtime_configuration(backup).revision == 10 &&
+            load_runtime_configuration(backup).configuration == durable_change,
+        "GUI apply persists primary and backup at the same revision");
+  Check(std::filesystem::equivalent(path, backup) == false &&
+            std::filesystem::file_size(path) == std::filesystem::file_size(backup),
+        "backup is independent durable file");
+  const auto unavailable_backup = directory / "missing" / "backup";
+  int durable_applies = 0;
+  RuntimeConfigurationController backup_failure(
+      [&](const MateRuntimeConfiguration&) {
+        ++durable_applies;
+        return OperationResult::Success;
+      }, std::make_unique<FileRuntimeConfigurationStore>(path, unavailable_backup),
+      durable_change, {}, 10);
+  Check(backup_failure.set(10, defaults).result == OperationResult::InternalError &&
+            durable_applies == 0 && load_runtime_configuration(path).revision == 10,
+        "backup prepare failure leaves live and authoritative state unchanged");
+  int rollback_applies = 0;
+  RuntimeConfigurationController interrupted_backup(
+      [&](const MateRuntimeConfiguration&) {
+        if (++rollback_applies == 1)
+          std::filesystem::remove(backup_directory / ".runtime-config.backup.pending");
+        return OperationResult::Success;
+      }, std::make_unique<FileRuntimeConfigurationStore>(path, backup),
+      durable_change, {}, 10);
+  Check(interrupted_backup.set(10, defaults).result ==
+            OperationResult::InternalError && rollback_applies == 2 &&
+            load_runtime_configuration(path).revision == 10 &&
+            load_runtime_configuration(backup).revision == 10 &&
+            load_runtime_configuration(path).configuration == durable_change &&
+            load_runtime_configuration(backup).configuration == durable_change,
+        "backup commit failure restores live, primary and backup revisions");
+  Check(!persist_runtime_configuration_atomic(path, defaults, error, 0),
+        "invalid revision is not persisted");
   std::filesystem::remove_all(directory);
 
   auto store = std::make_unique<Store>();

@@ -2,7 +2,9 @@
 #include <chrono>
 #include <csignal>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -21,6 +23,16 @@ namespace {
 std::atomic<bool> stopping{};
 
 extern "C" void Stop(int) { stopping = true; }
+
+bool SameFileContents(const std::filesystem::path& first,
+                      const std::filesystem::path& second) {
+  std::ifstream left(first, std::ios::binary);
+  std::ifstream right(second, std::ios::binary);
+  if (!left || !right) return false;
+  const std::string left_contents(std::istreambuf_iterator<char>{left}, {});
+  const std::string right_contents(std::istreambuf_iterator<char>{right}, {});
+  return !left.bad() && !right.bad() && left_contents == right_contents;
+}
 
 void Usage() {
   std::cerr
@@ -44,6 +56,7 @@ int main(int argc, char** argv) {
   bool boot_once = false;
   std::optional<std::filesystem::path> runtime_config_path;
   auto authoritative_configuration = MateRuntimeConfiguration{};
+  std::uint64_t authoritative_revision = 1;
   std::chrono::seconds startup_timeout{30};
   for (int index = 1; index < argc; ++index) {
     const std::string_view option(argv[index]);
@@ -119,9 +132,30 @@ int main(int argc, char** argv) {
                 << loaded.error << '\n';
       return 2;
     }
+    if (!loaded.existed) {
+      std::cerr << "cec-injector-mate: runtime configuration is missing; "
+                   "installation repair is required\n";
+      return 2;
+    }
+    if (*runtime_config_path ==
+        std::filesystem::path{"/etc/cec-injector-mate/runtime/config.conf"}) {
+      const auto backup_path = std::filesystem::path{
+          "/var/lib/cec-injector-mate/runtime-config.backup"};
+      if (std::filesystem::exists(backup_path)) {
+        const auto backup = load_runtime_configuration(backup_path);
+        if (!backup.ok() || backup.revision > loaded.revision ||
+            (backup.revision == loaded.revision &&
+             !SameFileContents(*runtime_config_path, backup_path))) {
+          std::cerr << "cec-injector-mate: runtime configuration backup "
+                       "conflicts with /etc; installation repair is required\n";
+          return 2;
+        }
+      }
+    }
     service_configuration.policy = loaded.configuration.policy;
     service_configuration.remote = loaded.configuration.remote;
     authoritative_configuration = loaded.configuration;
+    authoritative_revision = loaded.revision;
   } else {
     authoritative_configuration = {service_configuration.policy,
                                    service_configuration.remote};
@@ -182,10 +216,15 @@ int main(int argc, char** argv) {
       service.shutdown();
       return 2;
     }
+    const auto backup_path = *runtime_config_path ==
+        std::filesystem::path{"/etc/cec-injector-mate/runtime/config.conf"}
+        ? std::filesystem::path{"/var/lib/cec-injector-mate/runtime-config.backup"}
+        : std::filesystem::path{};
     RuntimeConfigurationController configuration_controller(
         service,
-        std::make_unique<FileRuntimeConfigurationStore>(*runtime_config_path),
-        authoritative_configuration);
+        std::make_unique<FileRuntimeConfigurationStore>(*runtime_config_path,
+                                                        backup_path),
+        authoritative_configuration, {}, authoritative_revision);
     frontend_linux::LinuxDbusFrontendService dbus_frontend(
         service, configuration_controller);
     if (dbus_frontend.start() != OperationResult::Success) {

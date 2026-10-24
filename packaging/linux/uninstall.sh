@@ -2,6 +2,7 @@
 set -eu
 
 root=${CEC_MATE_ROOT:-}
+source_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 purge_state=false
 desktop_user=${CEC_MATE_DESKTOP_USER:-}
 while test "$#" -gt 0; do
@@ -49,11 +50,14 @@ if test -n "$desktop_home"; then
     rm -f -- "$desktop_home/.local/share/icons/hicolor/$size/apps/cec-injector-mate.png"
   done
 fi
-rm -rf -- "${root}/opt/cec-injector-mate"
 if $purge_state; then
   rm -rf -- "${root}/var/lib/cec-injector-mate" \
-    "${root}/etc/cec-injector-mate/runtime"
+    "${root}/etc/cec-injector-mate"
+  "$source_dir/steamos-preservation.sh" purge
+else
+  "$source_dir/steamos-preservation.sh" config-only
 fi
+rm -rf -- "${root}/opt/cec-injector-mate"
 
 if test -n "$root"; then
   echo "staged integration removed; configuration and state preserved"
@@ -69,4 +73,4 @@ udevadm trigger --subsystem-match=misc --sysname-match=uinput --action=change
 udevadm settle
 if id cec-injector-mate >/dev/null 2>&1; then userdel cec-injector-mate; fi
 if getent group cec-injector-mate >/dev/null 2>&1; then groupdel cec-injector-mate; fi
-echo "configuration and state preserved under /etc and /var/lib; use --purge-state only for state"
+echo "configuration and state preserved under /etc and /var/lib; use --purge-state to remove both"

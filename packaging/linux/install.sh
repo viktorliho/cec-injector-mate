@@ -5,17 +5,20 @@ service_user=cec-injector-mate
 source_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 root=${CEC_MATE_ROOT:-}
 desktop_user=
+repair_only=false
 
 usage() {
-  echo "usage: install.sh [--desktop-user USER] BUNDLE VID PID SERIAL" >&2
+  echo "usage: install.sh [--repair-only] [--desktop-user USER] BUNDLE VID PID SERIAL" >&2
   exit 2
 }
 
-if test "${1:-}" = --desktop-user; then
-  test "$#" -ge 2 || usage
-  desktop_user=$2
-  shift 2
-fi
+while test "$#" -gt 0; do
+  case "$1" in
+    --desktop-user) test "$#" -ge 2 || usage; desktop_user=$2; shift 2;;
+    --repair-only) repair_only=true; shift;;
+    *) break;;
+  esac
+done
 test "$#" -eq 4 || usage
 bundle=$1
 vendor=$2
@@ -53,14 +56,8 @@ if test -z "$root"; then
     grep -Fq 'Name: Qt_6.4' || {
       echo "Qt 6.4-compatible runtime is unavailable" >&2; exit 1;
     }
-  qt_plugins=${CEC_MATE_QT_PLUGIN_ROOT:-/usr/lib/qt6/plugins}
-  test -x "$qt_plugins/platforms/libqxcb.so" || {
-    echo "Qt XCB platform plugin is unavailable" >&2; exit 1;
-  }
-  test -x "$qt_plugins/platforms/libqwayland-generic.so" ||
-    test -x "$qt_plugins/platforms/libqwayland-egl.so" || {
-      echo "Qt Wayland platform plugin is unavailable" >&2; exit 1;
-    }
+  CEC_MATE_QT_CHECK_DEPENDENCIES=1 \
+    "$source_dir/check-qt-platforms.sh" "${CEC_MATE_QT_PLUGIN_ROOT:-/usr/lib/qt6/plugins}"
   grep -Fq '<includedir>/etc/dbus-1/system.d</includedir>' \
     /usr/share/dbus-1/system.conf || {
       echo "/etc D-Bus system policy directory is unsupported" >&2; exit 1;
@@ -101,6 +98,15 @@ mate_commit=$(sed -n 's/^Mate commit: //p' "$bundle/MANIFEST.txt" | head -n 1)
 test "${#mate_commit}" -eq 40 || { echo "manifest has no valid Mate commit" >&2; exit 1; }
 case "$mate_commit" in *[!0-9a-f]*) echo "manifest has no valid Mate commit" >&2; exit 1;; esac
 release=/opt/cec-injector-mate/releases/$mate_commit
+if $repair_only; then
+  test "$(readlink -f "${root}/opt/cec-injector-mate/current")" = \
+    "$(readlink -f "${root}${release}")" || {
+    echo 'repair release is not the installed current release' >&2; exit 1;
+  }
+  cmp "$bundle/MANIFEST.txt" "${root}${release}/MANIFEST.txt" || {
+    echo 'repair manifest differs from installed release' >&2; exit 1;
+  }
+fi
 
 if test -z "$root"; then
   expected_executable=$(sed -n 's/^Executable SHA-256: //p' "$bundle/MANIFEST.txt")
@@ -144,9 +150,18 @@ runtime_seed=$(mktemp)
 config_tmp=$(mktemp)
 trap 'rm -f -- "$runtime_seed" "$config_tmp"' EXIT
 runtime_existing="${root}/etc/cec-injector-mate/runtime/config.conf"
+runtime_backup="${root}/var/lib/cec-injector-mate/runtime-config.backup"
+installation_backup="${root}/var/lib/cec-injector-mate/installation/installation.conf"
+"$source_dir/runtime-config-file.sh" check "$runtime_existing" "$runtime_backup"
 if test ! -f "$runtime_existing"; then
-  old_unit="${root}/etc/systemd/system/cec-injector-mate.service"
-  if test -f "$old_unit"; then
+  if test -f "$runtime_backup"; then
+    cp "$runtime_backup" "$runtime_seed"
+  elif test -e "${root}/opt/cec-injector-mate/current"; then
+    echo 'installed Mate configuration is missing and has no valid backup' >&2
+    exit 1
+  else
+    old_unit="${root}/etc/systemd/system/cec-injector-mate.service"
+    if test -f "$old_unit"; then
     old_exec=$(sed -n 's/^ExecStart=//p' "$old_unit")
     test -n "$old_exec" || { echo "cannot migrate runtime policy: old ExecStart absent" >&2; exit 1; }
     flag_value() { case " $old_exec " in *" $1 "*) printf true;; *) printf false;; esac; }
@@ -166,31 +181,15 @@ wake_host_on_tv_source_request=$(flag_value --wake-host-on-tv-source-request)
 remote_input_enabled=true
 remote_profile=$old_profile
 EOF
-  else
-    cp "$source_dir/config.conf" "$runtime_seed"
+    else
+      cp "$source_dir/config.conf" "$runtime_seed"
+    fi
   fi
+  "$source_dir/runtime-config-file.sh" validate "$runtime_seed" >/dev/null || {
+    echo 'runtime configuration seed is invalid' >&2; exit 1;
+  }
 fi
 
-stage="${root}${release}.new"
-rm -rf -- "$stage"
-install -d -m 0755 "$stage"
-cp -a -- "$bundle/." "$stage/"
-install -d -m 0755 "$stage/libexec"
-install -m 0755 "$source_dir/health-check.sh" "$stage/libexec/health-check"
-install -m 0755 "$source_dir/diagnostics.sh" "$stage/libexec/diagnostics"
-install -m 0755 "$source_dir/readiness.sh" "$stage/libexec/readiness"
-install -m 0755 "$source_dir/frontend-health.sh" "$stage/libexec/frontend-health"
-find "$stage" -type d -exec chmod 0755 {} +
-find "$stage" -type f -exec chmod go-w {} +
-chmod 0755 "$stage/bin/cec-injector-mate"
-chmod 0755 "$stage/bin/cec-injector-mate-gui"
-if test -z "$root"; then chown -R root:root "$stage"; fi
-rm -rf -- "${root}${release}"
-mv -- "$stage" "${root}${release}"
-install -d -m 0755 "${root}/opt/cec-injector-mate"
-ln -sfn "releases/$mate_commit" "${root}/opt/cec-injector-mate/current"
-
-install -d -m 0755 "${root}/etc/cec-injector-mate"
 cat >"$config_tmp" <<EOF
 CEC_MATE_VENDOR=$vendor
 CEC_MATE_PRODUCT=$product
@@ -199,7 +198,55 @@ CEC_MATE_DEVICE_ID=$device_id
 CEC_MATE_RELEASE=$mate_commit
 CEC_MATE_DESKTOP_USER=$desktop_user
 EOF
+if $repair_only; then
+  test -f "$installation_backup" && cmp -s "$installation_backup" "$config_tmp" || {
+    echo 'repair identity differs from protected installed identity' >&2
+    exit 1
+  }
+fi
+
+if ! $repair_only; then
+  stage="${root}${release}.new"
+  rm -rf -- "$stage"
+  install -d -m 0755 "$stage"
+  cp -a -- "$bundle/." "$stage/"
+  install -d -m 0755 "$stage/libexec" "$stage/installation/linux" \
+    "$stage/installation/steamos"
+  for helper in install.sh uninstall.sh repair-installed.sh runtime-config-file.sh \
+      steamos-preservation.sh check-qt-platforms.sh \
+      generate-device-access-rule.sh generate-remote-wake-rule.sh \
+      generate-polkit-rule.sh health-check.sh diagnostics.sh readiness.sh \
+      frontend-health.sh; do
+    install -m 0755 "$source_dir/$helper" "$stage/installation/linux/$helper"
+  done
+  for template in config.conf org.cecinjector.Mate.conf \
+      cec-injector-mate.desktop cec-injector-mate.service.in \
+      cec-injector-mate-boot.service.in; do
+    install -m 0644 "$source_dir/$template" "$stage/installation/linux/$template"
+  done
+  install -m 0644 "$source_dir/../steamos/cec-injector-mate.conf" \
+    "$stage/installation/steamos/cec-injector-mate.conf"
+  install -m 0644 "$source_dir/../steamos/cec-injector-mate-config-only.conf" \
+    "$stage/installation/steamos/cec-injector-mate-config-only.conf"
+  install -m 0755 "$source_dir/health-check.sh" "$stage/libexec/health-check"
+  install -m 0755 "$source_dir/diagnostics.sh" "$stage/libexec/diagnostics"
+  install -m 0755 "$source_dir/readiness.sh" "$stage/libexec/readiness"
+  install -m 0755 "$source_dir/frontend-health.sh" "$stage/libexec/frontend-health"
+  find "$stage" -type d -exec chmod 0755 {} +
+  find "$stage" -type f -exec chmod go-w {} +
+  chmod 0755 "$stage/bin/cec-injector-mate"
+  chmod 0755 "$stage/bin/cec-injector-mate-gui"
+  if test -z "$root"; then chown -R root:root "$stage"; fi
+  rm -rf -- "${root}${release}"
+  mv -- "$stage" "${root}${release}"
+  install -d -m 0755 "${root}/opt/cec-injector-mate"
+  ln -sfn "releases/$mate_commit" "${root}/opt/cec-injector-mate/current"
+fi
+
+install -d -m 0755 "${root}/etc/cec-injector-mate"
 install -m 0644 "$config_tmp" "${root}/etc/cec-injector-mate/installation.conf"
+"$source_dir/runtime-config-file.sh" copy "$config_tmp" \
+  "$installation_backup" ''
 
 # Runtime policy is a separate authority. Preserve an existing versioned file;
 # otherwise migrate the exact legacy ExecStart flags before replacing the unit.
@@ -213,6 +260,16 @@ chmod 0700 "$runtime_dir"
 chmod 0600 "$runtime_config"
 if test -z "$root"; then
   chown "$service_user:$service_user" "$runtime_dir" "$runtime_config"
+fi
+install -d -m 0700 "${root}/var/lib/cec-injector-mate"
+if test -z "$root"; then
+  chown "$service_user:$service_user" "${root}/var/lib/cec-injector-mate"
+fi
+"$source_dir/runtime-config-file.sh" reconcile "$runtime_config" \
+  "$runtime_backup" "$([ -z "$root" ] && printf '%s' "$service_user")"
+chmod 0600 "$runtime_backup"
+if test -z "$root"; then
+  chown "$service_user:$service_user" "$runtime_backup"
 fi
 
 install -d -m 0755 "${root}/etc/udev/rules.d" "${root}/etc/polkit-1/rules.d" \
@@ -260,6 +317,7 @@ sed -e "s|@EXECUTABLE@|$executable|g" -e "s|@DEVICE_ID@|$device_id|g" "$source_d
   >"${root}/etc/systemd/system/cec-injector-mate-boot.service"
 chmod 0644 "${root}/etc/systemd/system/cec-injector-mate.service" \
   "${root}/etc/systemd/system/cec-injector-mate-boot.service"
+"$source_dir/steamos-preservation.sh" install
 if test -n "$root"; then
   install -d -m 0700 "${root}/var/lib/cec-injector-mate"
   echo "staged installation under $root"
@@ -276,6 +334,11 @@ udevadm trigger --subsystem-match=misc --sysname-match=uinput --action=change
 udevadm trigger --subsystem-match=usb --attr-match=idVendor="$vendor" \
   --attr-match=idProduct="$product" --attr-match=serial="$serial" --action=change
 udevadm settle
+
+if $repair_only; then
+  echo 'Mate integration repaired; services remain untouched'
+  exit 0
+fi
 
 # Fail before enabling or starting Mate unless the installed identity can open
 # every production device endpoint through the just-applied permission model.

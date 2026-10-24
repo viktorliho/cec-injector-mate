@@ -41,6 +41,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CEC_INJECTOR_MATE_BUILD_LINUX)
         COMMAND sh
             ${PROJECT_SOURCE_DIR}/packaging/linux/tests/production_installation_test.sh
             ${PROJECT_SOURCE_DIR})
+    add_test(NAME mate-steamos-update-survivability
+        COMMAND sh
+            ${PROJECT_SOURCE_DIR}/packaging/steamos/tests/update_survivability_test.sh
+            ${PROJECT_SOURCE_DIR})
+    add_test(NAME mate-linux-qt-platform-check
+        COMMAND sh
+            ${PROJECT_SOURCE_DIR}/packaging/linux/tests/qt_platform_check_test.sh
+            ${PROJECT_SOURCE_DIR})
 endif()
 
 add_executable(mate-service-tests service_test.cpp)
