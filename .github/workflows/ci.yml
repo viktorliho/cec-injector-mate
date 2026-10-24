@@ -69,7 +69,7 @@ jobs:
           apt-get update
           apt-get install --yes --no-install-recommends \
             ca-certificates cmake g++ git libdrm-dev libsystemd-dev \
-            libudev-dev make pkg-config systemd zsh
+            libudev-dev make pkg-config rsync systemd zsh
 
       - name: Check out source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -128,7 +128,7 @@ jobs:
           apt-get install --yes --no-install-recommends \
             ca-certificates cmake dbus-daemon g++ git libdrm-dev \
             libsystemd-dev libudev-dev make pkg-config qt6-base-dev \
-            qt6-base-dev-tools
+            qt6-base-dev-tools rsync
 
       - name: Check out source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -193,7 +193,7 @@ jobs:
           apt-get update
           apt-get install --yes --no-install-recommends \
             binutils build-essential ca-certificates cmake git libdrm-dev \
-            libsystemd-dev libudev-dev libx11-dev libxrandr-dev pkg-config
+            libsystemd-dev libudev-dev libx11-dev libxrandr-dev pkg-config rsync
 
       - name: Check out source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
